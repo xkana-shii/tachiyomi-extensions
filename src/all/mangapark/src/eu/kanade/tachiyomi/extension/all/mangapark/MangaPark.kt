@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.extension.all.mangapark
 
 import android.app.Application
 import android.widget.Toast
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
@@ -164,13 +165,23 @@ class MangaPark(
 
         return POST(apiUrl, headers, payload)
     }
+    private var titleRegex: Regex =
+        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official|【[^】]*】", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(response: Response): SManga {
         val result = response.parseAs<DetailsResponse>()
+        val manga = result.data.comic.data.toSManga()
 
-        return result.data.comic.data.toSManga()
+        val isRemoveTitleVersion = preference.getBoolean(REMOVE_TITLE_VERSION_PREF, true)
+        val customRemoveTitle = preference.getString(REMOVE_TITLE_CUSTOM_PREF, "") ?: ""
+
+        manga.title = manga.title
+            .replace(Regex(customRemoveTitle), "")
+            .replace(if (isRemoveTitleVersion) titleRegex else Regex(""), "")
+            .trim()
+
+        return manga
     }
-
     override fun getMangaUrl(manga: SManga) = baseUrl + manga.url.substringBeforeLast("#")
 
     override fun chapterListRequest(manga: SManga): Request {
@@ -233,6 +244,20 @@ class MangaPark(
             title = "Fetch Duplicate Chapters"
             summary = "Refresh chapter list to apply changes"
             setDefaultValue(false)
+        }.also(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = REMOVE_TITLE_VERSION_PREF
+            title = "Remove version information from entry titles"
+            summary = "This removes version tags like '(Official)' from entry titles."
+            setDefaultValue(true)
+        }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = REMOVE_TITLE_CUSTOM_PREF
+            title = "Custom regex to be removed from title"
+            summary = preference.getString(REMOVE_TITLE_CUSTOM_PREF, "") ?: ""
+            setDefaultValue("")
         }.also(screen::addPreference)
     }
 
@@ -302,5 +327,7 @@ class MangaPark(
         )
 
         private const val DUPLICATE_CHAPTER_PREF_KEY = "pref_dup_chapters"
+        private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+        private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"
     }
 }

@@ -84,11 +84,8 @@ open class BatoTo(
         val removeOfficialPref = CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
             title = "Remove version information from entry titles"
-            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
-                "and helps identify duplicate entries in your library. " +
-                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
-                "You might also want to clear the database in advanced settings."
-            setDefaultValue(false)
+            summary = "This removes version tags like '(Official)' from entry titles."
+            setDefaultValue(true)
         }
         val removeCustomPref = EditTextPreference(screen.context).apply {
             key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
@@ -342,7 +339,7 @@ open class BatoTo(
         return super.mangaDetailsRequest(manga)
     }
     private var titleRegex: Regex =
-        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official", RegexOption.IGNORE_CASE)
+        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official|【[^】]*】", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document): SManga {
         val infoElement = document.select("div#mainer div.container-fluid")
@@ -357,27 +354,60 @@ open class BatoTo(
             .replace(Regex(customRemoveTitle()), "")
             .replace(if (isRemoveTitleVersion()) titleRegex else Regex(""), "")
             .trim()
+        val extraInfo = document.select("div[style=\"white-space: pre-wrap; overflow: auto;\"]")
+            .takeIf { it.isNotEmpty() }
+            ?.html()
+            ?.trim()
+            ?: ""
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = description +
-            if (alternativeTitles.isNotBlank()) "\n\nAlternative Titles:\n$alternativeTitles" else ""
+        manga.description = buildString {
+            val names = alternativeTitles.takeUnless { it.isBlank() }
+                ?.split("/")
+                ?.map { "• ${it.trim()}" }
+                ?.joinToString("\n")
+
+            if (description.isBlank()) {
+                if (!names.isNullOrEmpty()) {
+                    append("Alternative Names:\n", names)
+                }
+            } else {
+                append(description)
+                if (!names.isNullOrEmpty()) {
+                    append("\n\nAlternative Names:\n", names)
+                }
+            }
+            if (extraInfo.isNotBlank()) {
+                append("\n\nExtra Info:\n", extraInfo)
+            }
+        }
+
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
-    private fun parseStatus(workStatus: String?, uploadStatus: String?) = when {
-        workStatus == null -> SManga.UNKNOWN
-        workStatus.contains("Ongoing") -> SManga.ONGOING
-        workStatus.contains("Cancelled") -> SManga.CANCELLED
-        workStatus.contains("Hiatus") -> SManga.ON_HIATUS
-        workStatus.contains("Completed") -> when {
-            uploadStatus?.contains("Ongoing") == true -> SManga.PUBLISHING_FINISHED
-            else -> SManga.COMPLETED
+
+    private fun parseStatus(workStatus: String?, uploadStatus: String?): Int {
+        return when {
+            workStatus.isNullOrBlank() -> when (uploadStatus?.trim()) {
+                "Ongoing" -> SManga.ONGOING
+                "Completed" -> SManga.COMPLETED
+                "Hiatus" -> SManga.ON_HIATUS
+                "Cancelled" -> SManga.CANCELLED
+                else -> SManga.UNKNOWN
+            }
+            workStatus.trim() == "Ongoing" -> SManga.ONGOING
+            workStatus.trim() == "Cancelled" -> SManga.CANCELLED
+            workStatus.trim() == "Hiatus" -> SManga.ON_HIATUS
+            workStatus.trim() == "Completed" -> when (uploadStatus?.trim()) {
+                "Ongoing" -> SManga.PUBLISHING_FINISHED
+                else -> SManga.COMPLETED
+            }
+            else -> SManga.UNKNOWN
         }
-        else -> SManga.UNKNOWN
     }
 
     private fun altChapterParse(response: Response): List<SChapter> {

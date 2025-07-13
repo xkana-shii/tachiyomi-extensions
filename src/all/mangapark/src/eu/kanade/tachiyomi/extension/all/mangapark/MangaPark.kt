@@ -453,6 +453,7 @@ class MangaPark(
 
         // New preference keys for the downloaded regex feature
         private const val REMOVE_TITLE_VERSION_PREF = "pref_remove_version_title"
+
         // Key for the actual downloaded regex string, accessible by the worker
         const val REMOVE_TITLE_VERSION_DOWNLOADED_REGEX_KEY = "pref_downloaded_version_regex"
 
@@ -462,7 +463,6 @@ class MangaPark(
 }
 
 const val THUMBNAIL_LOOPBACK_HOST = "127.0.0.1"
-
 
 /**
  * [RegexRefreshWorker] is a CoroutineWorker responsible for periodically fetching
@@ -530,7 +530,8 @@ fun scheduleRegexRefresh(context: Context) {
     val preferences = context.getSharedPreferences("MangaPark_Preferences", Context.MODE_PRIVATE) // Match the name used in worker
     if (preferences.getBoolean(MangaPark.REMOVE_TITLE_VERSION_PREF, false)) {
         val refreshRequest = PeriodicWorkRequestBuilder<RegexRefreshWorker>(
-            12, TimeUnit.HOURS, // Repeat every 12 hours
+            12,
+            TimeUnit.HOURS, // Repeat every 12 hours
         )
             .setConstraints(
                 Constraints.Builder()

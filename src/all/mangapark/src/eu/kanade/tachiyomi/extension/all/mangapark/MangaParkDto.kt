@@ -46,37 +46,24 @@ class MangaParkComic(
     @SerialName("max_chapterNode") private val latestChapter: Data<ImageFiles>? = null,
     @SerialName("first_chapterNode") private val firstChapter: Data<ImageFiles>? = null,
 ) {
-    fun toSManga(
-        shortenTitle: Boolean,
-        pageAsCover: String,
-        customTitleRegex: Regex,
-        downloadedVersionRegex: Regex, // New parameter for downloaded regex
-        enableVersionRemoval: Boolean // New parameter to control if downloaded regex is used
-    ) = SManga.create().apply {
+    fun toSManga(shortenTitle: Boolean, pageAsCover: String, customTitleRegex: Regex) = SManga.create().apply {
         url = "$urlPath#$id"
         title = if (shortenTitle) {
             var shortName = name
-            while (shortenTitleRegex.containsMatchIn(shortName)) {
-                shortName = shortName.replace(shortenTitleRegex, "").trim()
+            while (shortenTitleRegex.containsMatchIn(shortName)) { // Use the Regex from companion object.
+                shortName = shortName.replace(shortenTitleRegex, "").trim() // Use the Regex from companion object.
             }
             if (customTitleRegex.pattern.isNotEmpty()) {
                 shortName = shortName.replace(customTitleRegex, "").trim()
             }
-            // Apply the downloaded regex if enabled and not empty
-            if (enableVersionRemoval && downloadedVersionRegex.pattern.isNotEmpty()) {
-                shortName = shortName.replace(downloadedVersionRegex, "").trim()
-            }
+
             shortName
         } else {
-            var newName = name
             if (customTitleRegex.pattern.isNotEmpty()) {
-                newName = newName.replace(customTitleRegex, "").trim()
+                name.replace(customTitleRegex, "").trim()
+            } else {
+                name
             }
-            // Apply the downloaded regex if enabled and not empty
-            if (enableVersionRemoval && downloadedVersionRegex.pattern.isNotEmpty()) {
-                newName = newName.replace(downloadedVersionRegex, "").trim()
-            }
-            newName
         }
         thumbnail_url = run {
             val coverUrl = cover?.let {
@@ -116,37 +103,29 @@ class MangaParkComic(
                 ) { "- ${it.trim()}" }
                 ?.also(::append)
 
-            val matches = mutableListOf<String>()
+            val matches = mutableListOf<String>() // Store the matched strings directly
 
-            // Collect matches from shortenTitleRegex (if shortenTitle is true)
             if (shortenTitle) {
-                var tempTitle = name // Start with the original name to find all matches
-                shortenTitleRegex.findAll(tempTitle).forEach { matchResult ->
-                    matches.add(matchResult.value)
+                val tempTitle = if (shortenTitleRegex.containsMatchIn(name)) {
+                    var shortName = name
+                    while (shortenTitleRegex.containsMatchIn(shortName)) {
+                        val match = shortenTitleRegex.find(shortName)!!
+                        matches.add(match.value) // Store match.value
+                        shortName = shortName.replace(match.value, "").trim()
+                    }
+                    shortName
+                } else {
+                    name
                 }
-                // Then perform the actual replacement for the shortened title process
-                tempTitle = tempTitle.replace(shortenTitleRegex, "").trim()
 
-                // Now, check for custom and downloaded regex matches on the *partially processed* title
                 if (customTitleRegex.pattern.isNotEmpty()) {
                     customTitleRegex.findAll(tempTitle).forEach { matchResult ->
                         matches.add(matchResult.value)
                     }
                 }
-                if (enableVersionRemoval && downloadedVersionRegex.pattern.isNotEmpty()) {
-                    downloadedVersionRegex.findAll(tempTitle).forEach { matchResult ->
-                        matches.add(matchResult.value)
-                    }
-                }
             } else {
-                // If shortenTitle is false, still check for custom and downloaded regex matches on the original title
                 if (customTitleRegex.pattern.isNotEmpty()) {
                     customTitleRegex.findAll(name).forEach { matchResult ->
-                        matches.add(matchResult.value)
-                    }
-                }
-                if (enableVersionRemoval && downloadedVersionRegex.pattern.isNotEmpty()) {
-                    downloadedVersionRegex.findAll(name).forEach { matchResult ->
                         matches.add(matchResult.value)
                     }
                 }
@@ -154,8 +133,7 @@ class MangaParkComic(
 
             if (matches.isNotEmpty()) {
                 append("\n\n----\n#### **Removed from title**\n")
-                // Use a Set to ensure unique matches are displayed
-                matches.toSet().forEach { match ->
+                matches.forEach { match ->
                     append("- `$match`\n")
                 }
             }

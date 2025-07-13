@@ -216,13 +216,13 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
                 if (!names.isNullOrEmpty()) {
                     append("\n\n----\n#### **Alternative Titles**\n", names)
                 }
-                val matches = mutableListOf<String>() // Store the matched strings directly
+                val matches = mutableListOf<String>()
 
                 val tempTitle = if (isRemoveTitleVersion()) {
                     var shortName = originalTitle
                     while (titleRegex.containsMatchIn(shortName)) {
                         val match = titleRegex.find(shortName)!!
-                        matches.add(match.value) // Store match.value
+                        matches.add(match.value)
                         shortName = shortName.replace(match.value, "").trim()
                     }
                     shortName
@@ -232,9 +232,8 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
                 if (customRemoveTitle().isNotEmpty()) {
                     val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
-                    val customMatch = customRegex.find(tempTitle)
-                    if (customMatch != null) {
-                        matches.add(customMatch.value) // Store customMatch.value
+                    customRegex.findAll(tempTitle).forEach { matchResult ->
+                        matches.add(matchResult.value)
                     }
                 }
 
@@ -243,7 +242,7 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
                 if (matches.isNotEmpty()) {
                     append("\n\n----\n#### **Removed from title**\n")
                     matches.forEach { match ->
-                        append("- `$match`\n") // Correctly use the stored string
+                        append("- `$match`\n")
                     }
                 }
             }.trim()

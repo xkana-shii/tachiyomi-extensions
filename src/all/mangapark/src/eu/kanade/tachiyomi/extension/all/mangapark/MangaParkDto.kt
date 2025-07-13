@@ -119,16 +119,14 @@ class MangaParkComic(
                 }
 
                 if (customTitleRegex.pattern.isNotEmpty()) {
-                    val customMatch = customTitleRegex.find(tempTitle)
-                    if (customMatch != null) {
-                        matches.add(customMatch.value) // Store customMatch.value
+                    customTitleRegex.findAll(tempTitle).forEach { matchResult ->
+                        matches.add(matchResult.value)
                     }
                 }
             } else {
                 if (customTitleRegex.pattern.isNotEmpty()) {
-                    val customMatch = customTitleRegex.find(name)
-                    if (customMatch != null) {
-                        matches.add(customMatch.value) // Store customMatch.value
+                    customTitleRegex.findAll(name).forEach { matchResult ->
+                        matches.add(matchResult.value)
                     }
                 }
             }
@@ -136,7 +134,7 @@ class MangaParkComic(
             if (matches.isNotEmpty()) {
                 append("\n\n----\n#### **Removed from title**\n")
                 matches.forEach { match ->
-                    append("- `$match`\n") // Correctly use the stored string
+                    append("- `$match`\n")
                 }
             }
         }.trim()

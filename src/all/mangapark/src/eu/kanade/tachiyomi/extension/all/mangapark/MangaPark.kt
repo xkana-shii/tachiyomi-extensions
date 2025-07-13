@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.mangapark
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
@@ -34,6 +36,16 @@ import okhttp3.Response
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
+import androidx.work.CoroutineWorker // For the worker class
+import androidx.work.WorkerParameters // For the worker class
+import okhttp3.OkHttpClient // For the worker to fetch regex
+
 class MangaPark(
     override val lang: String,
     private val siteLang: String = lang,
@@ -45,7 +57,12 @@ class MangaPark(
 
     override val versionId = 2
 
-    private val preference = getPreferences()
+    // Renamed to 'preferences' to avoid clash with the getter, constructor parameter
+    private val preferences: SharedPreferences = getPreferences()
+
+    // Override the `preference` getter from ConfigurableSource to use the injected preferences
+    override val preference: SharedPreferences
+        get() = preferences
 
     private val domain =
         preference.getString(MIRROR_PREF_KEY, MIRROR_PREF_DEFAULT) ?: MIRROR_PREF_DEFAULT
@@ -101,9 +118,17 @@ class MangaPark(
         val pageAsCover = preference.getString(UNCENSORED_COVER_PREF, "off")!!
         val shortenTitle = preference.getBoolean(SHORTEN_TITLE_PREF, false)
         val customTitleRegex = customRemoveTitle() // Retrieve custom regex
+        val downloadedVersionRegex = getDownloadedVersionRegex() // Retrieve the downloaded regex
+        val enableVersionRemoval = preference.getBoolean(REMOVE_TITLE_VERSION_PREF, false) // Check if feature is enabled
 
         val entries = result.data.searchComics.items.map {
-            it.data.toSManga(shortenTitle, pageAsCover, customTitleRegex) // Pass regex to toSManga
+            it.data.toSManga(
+                shortenTitle,
+                pageAsCover,
+                customTitleRegex,
+                downloadedVersionRegex, // Pass downloaded regex
+                enableVersionRemoval // Pass enable flag
+            )
         }
         val hasNextPage = entries.size == size
 
@@ -174,8 +199,16 @@ class MangaPark(
         val pageAsCover = preference.getString(UNCENSORED_COVER_PREF, "off")!!
         val shortenTitle = preference.getBoolean(SHORTEN_TITLE_PREF, false)
         val customTitleRegex = customRemoveTitle() // Retrieve custom regex
+        val downloadedVersionRegex = getDownloadedVersionRegex() // Retrieve the downloaded regex
+        val enableVersionRemoval = preference.getBoolean(REMOVE_TITLE_VERSION_PREF, false) // Check if feature is enabled
 
-        return result.data.comic.data.toSManga(shortenTitle, pageAsCover, customTitleRegex) // Pass regex to toSManga
+        return result.data.comic.data.toSManga(
+            shortenTitle,
+            pageAsCover,
+            customTitleRegex,
+            downloadedVersionRegex, // Pass downloaded regex
+            enableVersionRemoval // Pass enable flag
+        )
     }
 
     override fun getMangaUrl(manga: SManga) = baseUrl + manga.url.substringBeforeLast("#")
@@ -191,13 +224,38 @@ class MangaPark(
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val result = response.parseAs<ChapterListResponse>()
+        val enableRawChapters = preference.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)
 
         return if (preference.getBoolean(DUPLICATE_CHAPTER_PREF_KEY, false)) {
-            result.data.chapterList.flatMap {
-                it.data.dupChapters.map { it.data.toSChapter() }
-            }.reversed()
+            result.data.chapterList.flatMap { chapterData ->
+                // Filter out raw chapters if the preference is off for the main chapter
+                if (!enableRawChapters && chapterData.data.scanlator?.startsWith("raw", true) == true) {
+                    emptyList()
+                } else {
+                    val mainChapter = chapterData.data.toSChapter()
+                    // Filter duplicate chapters based on the raw chapters preference
+                    val dupChapters = chapterData.data.dupChapters
+                        .filter { dupChapterData ->
+                            !(!enableRawChapters && dupChapterData.data.scanlator?.startsWith("raw", true) == true)
+                        }
+                        .map { it.data.toSChapter() }
+                    listOf(mainChapter) + dupChapters
+                }
+            }.reversed() // Reverse after filtering and combining
         } else {
-            result.data.chapterList.map { it.data.toSChapter() }.reversed()
+            result.data.chapterList.map { it.data.toSChapter() }
+                .filter { chapterData -> // Apply filter for raw chapters here too
+                    !(!enableRawChapters && chapterData.scanlator?.startsWith("raw", true) == true)
+                }
+                .reversed()
+        }.sortedWith { c1, c2 -> // Ensure correct sorting after all filtering
+            val chapterNum1 = c1.chapter_number
+            val chapterNum2 = c2.chapter_number
+
+            when {
+                chapterNum1 != chapterNum2 -> chapterNum2.compareTo(chapterNum1)
+                else -> c2.date_upload.compareTo(c1.date_upload) // If chapter numbers are same, sort by upload date
+            }
         }
     }
 
@@ -257,10 +315,29 @@ class MangaPark(
             setDefaultValue(false)
         }.also(screen::addPreference)
 
-        EditTextPreference(screen.context).apply { // Add this
+        // New preference for online regex for version removal
+        SwitchPreferenceCompat(screen.context).apply {
+            key = REMOVE_TITLE_VERSION_PREF
+            title = "Remove version information from title (online regex)"
+            summary = "Downloads and applies a regex from an online source to remove version strings like '(v2)' from titles. Requires network."
+            setDefaultValue(false)
+            setOnPreferenceChangeListener { _, newValue ->
+                if (newValue as Boolean) {
+                    // Schedule the worker immediately if enabled
+                    scheduleRegexRefresh(screen.context.applicationContext)
+                    Toast.makeText(screen.context, "Attempting to download regex. Restart the app or refresh lists to apply changes.", Toast.LENGTH_LONG).show()
+                } else {
+                    // Cancel the worker if disabled
+                    WorkManager.getInstance(screen.context.applicationContext).cancelUniqueWork("MangaParkRegexRefreshWork")
+                }
+                true
+            }
+        }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
             key = REMOVE_TITLE_CUSTOM_PREF
             title = "Custom title regex"
-            summary = "If not empty, replace title with custom regex."
+            summary = "If not empty, replace title with custom regex. Example: `\\[\\d+\\]` for `[123]`"
             setDefaultValue("")
         }.also(screen::addPreference)
 
@@ -271,6 +348,13 @@ class MangaPark(
             entries = arrayOf("Off", "First Chapter", "Last Chapter")
             entryValues = arrayOf("off", "first", "last")
             setDefaultValue("off")
+        }.also(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_RAW_CHAPTERS_PREF
+            title = "Show raw chapters"
+            summary = "Displays chapters marked as 'raw' in the chapter list."
+            setDefaultValue(false)
         }.also(screen::addPreference)
     }
 
@@ -329,8 +413,14 @@ class MangaPark(
         throw UnsupportedOperationException()
     }
 
-    private fun customRemoveTitle(): Regex { // Add this function
+    private fun customRemoveTitle(): Regex {
         val regex = preference.getString(REMOVE_TITLE_CUSTOM_PREF, "") ?: ""
+        return if (regex.isNotBlank()) Regex(regex) else Regex("")
+    }
+
+    private fun getDownloadedVersionRegex(): Regex {
+        // Retrieves the regex string downloaded by the worker from SharedPreferences
+        val regex = preference.getString(REMOVE_TITLE_VERSION_DOWNLOADED_REGEX_KEY, "") ?: ""
         return if (regex.isNotBlank()) Regex(regex) else Regex("")
     }
 
@@ -360,9 +450,111 @@ class MangaPark(
         private const val ENABLE_NSFW = "pref_nsfw"
         private const val DUPLICATE_CHAPTER_PREF_KEY = "pref_dup_chapters"
         private const val SHORTEN_TITLE_PREF = "pref_shorten_title"
-        private const val REMOVE_TITLE_CUSTOM_PREF = "pref_custom_title_regex" // Add this
+        private const val REMOVE_TITLE_CUSTOM_PREF = "pref_custom_title_regex"
+
+        // New preference keys for the downloaded regex feature
+        private const val REMOVE_TITLE_VERSION_PREF = "pref_remove_version_title"
+        // Key for the actual downloaded regex string, accessible by the worker
+        const val REMOVE_TITLE_VERSION_DOWNLOADED_REGEX_KEY = "pref_downloaded_version_regex"
+
         private const val UNCENSORED_COVER_PREF = "pref_uncensored_cover"
+        private const val SHOW_RAW_CHAPTERS_PREF = "show_raw_chapters" // New preference key for raw chapters
     }
 }
 
 const val THUMBNAIL_LOOPBACK_HOST = "127.0.0.1"
+
+/*
+ * ==============================================================================
+ * WORKMANAGER WORKER CLASS AND SCHEDULER FUNCTION
+ * (Ideally, these would be in their own separate Kotlin files for better organization,
+ * e.g., RegexRefreshWorker.kt and WorkScheduler.kt or similar)
+ * ==============================================================================
+ */
+
+/**
+ * [RegexRefreshWorker] is a CoroutineWorker responsible for periodically fetching
+ * the latest regex pattern from a remote URL and saving it to SharedPreferences.
+ */
+class RegexRefreshWorker(
+    appContext: Context,
+    workerParams: WorkerParameters
+) : CoroutineWorker(appContext, workerParams) {
+
+    override suspend fun doWork(): Result {
+        return try {
+            val client = OkHttpClient() // Ensure OkHttpClient is available. This usually comes from the app's DI or is globally accessible in a larger project.
+            val request = Request.Builder()
+                .url("https://raw.githubusercontent.com/xkana-shii/tachiyomi-extensions/master/regex.txt")
+                .build()
+
+            val response = client.newCall(request).execute()
+            if (!response.isSuccessful) {
+                // Log.e("RegexRefreshWorker", "Failed to fetch regex: ${response.code} ${response.message}")
+                return Result.retry()
+            }
+
+            val regexText = response.body?.string()
+                ?: run {
+                    // Log.e("RegexRefreshWorker", "Fetched regex body is null.")
+                    return Result.failure()
+                }
+
+            val preferences = applicationContext.getSharedPreferences(
+                "MangaPark_Preferences", // THIS IS CRUCIAL: VERIFY THIS PREFERENCE FILE NAME
+                                         // It needs to match how 'getPreferences()' in MangaPark
+                                         // obtains its SharedPreferences instance.
+                                         // If getPreferences() uses the default name for the source,
+                                         // you might need a different way to get the preferences here.
+                                         // For many Tachiyomi extensions, it's context.getSharedPreferences("source_name_preferences", MODE_PRIVATE)
+                                         // For 'getPreferences()' in util, it often uses the package name or a specific key.
+                                         // You may need to inspect `keiyoushi.utils.getPreferences` to confirm the exact name.
+                                         // A common pattern is "${source.id}_preferences" or "${source.name}_preferences"
+                Context.MODE_PRIVATE
+            )
+
+            preferences.edit()
+                .putString(MangaPark.REMOVE_TITLE_VERSION_DOWNLOADED_REGEX_KEY, regexText)
+                .apply()
+
+            Result.success()
+        } catch (e: Exception) {
+            // Log.e("RegexRefreshWorker", "Error refreshing regex", e)
+            Result.retry()
+        }
+    }
+}
+
+/**
+ * Schedules the periodic WorkManager task to refresh the online regex.
+ * This function should be called when the application starts or when the user
+ * explicitly enables the preference for online regex removal.
+ *
+ * @param context The application context.
+ */
+fun scheduleRegexRefresh(context: Context) {
+    // Only schedule if the preference is actually enabled.
+    // This check is important if this function is called outside of the preference change listener.
+    val preferences = context.getSharedPreferences("MangaPark_Preferences", Context.MODE_PRIVATE) // Match the name used in worker
+    if (preferences.getBoolean(MangaPark.REMOVE_TITLE_VERSION_PREF, false)) {
+        val refreshRequest = PeriodicWorkRequestBuilder<RegexRefreshWorker>(
+            12, TimeUnit.HOURS // Repeat every 12 hours
+        )
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .addTag("mangapark_regex_refresh_worker_tag")
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            "MangaParkRegexRefreshWork",
+            ExistingPeriodicWorkPolicy.KEEP, // Keep existing work if it's already scheduled
+            refreshRequest
+        )
+    } else {
+        // If the preference is disabled, cancel any existing work
+        WorkManager.getInstance(context).cancelUniqueWork("MangaParkRegexRefreshWork")
+    }
+}

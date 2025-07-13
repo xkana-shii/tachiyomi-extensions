@@ -401,9 +401,8 @@ open class BatoTo(
 
             if (customRemoveTitle().isNotEmpty()) {
                 val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
-                val customMatch = customRegex.find(tempTitle)
-                if (customMatch != null) {
-                    matches.add(customMatch.value) // Store customMatch.value
+                customRegex.findAll(tempTitle).forEach { matchResult ->
+                    matches.add(matchResult.value)
                 }
             }
 

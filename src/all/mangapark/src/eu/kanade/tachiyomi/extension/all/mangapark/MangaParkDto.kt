@@ -51,7 +51,7 @@ class MangaParkComic(
         pageAsCover: String,
         customTitleRegex: Regex,
         downloadedVersionRegex: Regex, // New parameter for downloaded regex
-        enableVersionRemoval: Boolean, // New parameter to control if downloaded regex is used
+        enableVersionRemoval: Boolean // New parameter to control if downloaded regex is used
     ) = SManga.create().apply {
         url = "$urlPath#$id"
         title = if (shortenTitle) {

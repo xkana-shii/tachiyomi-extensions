@@ -7,13 +7,6 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import androidx.work.Constraints
-import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.PeriodicWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import eu.kanade.tachiyomi.lib.cookieinterceptor.CookieInterceptor
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
@@ -37,13 +30,21 @@ import kotlinx.coroutines.launch
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
+import androidx.work.CoroutineWorker // For the worker class
+import androidx.work.WorkerParameters // For the worker class
+import okhttp3.OkHttpClient // For the worker to fetch regex
 
 class MangaPark(
     override val lang: String,
@@ -126,7 +127,7 @@ class MangaPark(
                 pageAsCover,
                 customTitleRegex,
                 downloadedVersionRegex, // Pass downloaded regex
-                enableVersionRemoval, // Pass enable flag
+                enableVersionRemoval // Pass enable flag
             )
         }
         val hasNextPage = entries.size == size
@@ -206,7 +207,7 @@ class MangaPark(
             pageAsCover,
             customTitleRegex,
             downloadedVersionRegex, // Pass downloaded regex
-            enableVersionRemoval, // Pass enable flag
+            enableVersionRemoval // Pass enable flag
         )
     }
 
@@ -463,6 +464,13 @@ class MangaPark(
 
 const val THUMBNAIL_LOOPBACK_HOST = "127.0.0.1"
 
+/*
+ * ==============================================================================
+ * WORKMANAGER WORKER CLASS AND SCHEDULER FUNCTION
+ * (Ideally, these would be in their own separate Kotlin files for better organization,
+ * e.g., RegexRefreshWorker.kt and WorkScheduler.kt or similar)
+ * ==============================================================================
+ */
 
 /**
  * [RegexRefreshWorker] is a CoroutineWorker responsible for periodically fetching
@@ -470,7 +478,7 @@ const val THUMBNAIL_LOOPBACK_HOST = "127.0.0.1"
  */
 class RegexRefreshWorker(
     appContext: Context,
-    workerParams: WorkerParameters,
+    workerParams: WorkerParameters
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -494,15 +502,15 @@ class RegexRefreshWorker(
 
             val preferences = applicationContext.getSharedPreferences(
                 "MangaPark_Preferences", // THIS IS CRUCIAL: VERIFY THIS PREFERENCE FILE NAME
-                // It needs to match how 'getPreferences()' in MangaPark
-                // obtains its SharedPreferences instance.
-                // If getPreferences() uses the default name for the source,
-                // you might need a different way to get the preferences here.
-                // For many Tachiyomi extensions, it's context.getSharedPreferences("source_name_preferences", MODE_PRIVATE)
-                // For 'getPreferences()' in util, it often uses the package name or a specific key.
-                // You may need to inspect `keiyoushi.utils.getPreferences` to confirm the exact name.
-                // A common pattern is "${source.id}_preferences" or "${source.name}_preferences"
-                Context.MODE_PRIVATE,
+                                         // It needs to match how 'getPreferences()' in MangaPark
+                                         // obtains its SharedPreferences instance.
+                                         // If getPreferences() uses the default name for the source,
+                                         // you might need a different way to get the preferences here.
+                                         // For many Tachiyomi extensions, it's context.getSharedPreferences("source_name_preferences", MODE_PRIVATE)
+                                         // For 'getPreferences()' in util, it often uses the package name or a specific key.
+                                         // You may need to inspect `keiyoushi.utils.getPreferences` to confirm the exact name.
+                                         // A common pattern is "${source.id}_preferences" or "${source.name}_preferences"
+                Context.MODE_PRIVATE
             )
 
             preferences.edit()
@@ -530,12 +538,12 @@ fun scheduleRegexRefresh(context: Context) {
     val preferences = context.getSharedPreferences("MangaPark_Preferences", Context.MODE_PRIVATE) // Match the name used in worker
     if (preferences.getBoolean(MangaPark.REMOVE_TITLE_VERSION_PREF, false)) {
         val refreshRequest = PeriodicWorkRequestBuilder<RegexRefreshWorker>(
-            12, TimeUnit.HOURS, // Repeat every 12 hours
+            12, TimeUnit.HOURS // Repeat every 12 hours
         )
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
+                    .build()
             )
             .addTag("mangapark_regex_refresh_worker_tag")
             .build()
@@ -543,7 +551,7 @@ fun scheduleRegexRefresh(context: Context) {
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             "MangaParkRegexRefreshWork",
             ExistingPeriodicWorkPolicy.KEEP, // Keep existing work if it's already scheduled
-            refreshRequest,
+            refreshRequest
         )
     } else {
         // If the preference is disabled, cancel any existing work

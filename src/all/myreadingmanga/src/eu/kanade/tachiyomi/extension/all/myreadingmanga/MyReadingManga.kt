@@ -45,18 +45,21 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override val supportsLatest = true
 
-    // Popular - Random
+    // Popular
     override fun popularMangaRequest(page: Int): Request {
-        return GET("$baseUrl/search/?wpsolr_sort=sort_by_random&wpsolr_page=$page&wpsolr_fq[0]=lang_str:$siteLang", headers) // Random Manga as returned by search
+        return GET("$baseUrl/popular" + if (page > 1) "/page/$page/" else "/", headers)
     }
 
+    override fun popularMangaNextPageSelector() = "li.pagination-next"
+    override fun popularMangaSelector() = "div.content-archive article.post:not(.category-video)"
+    override fun popularMangaFromElement(element: Element) = buildManga(
+        element.selectFirst("h2.entry-title a")!!,
+        element.selectFirst("a.entry-image-link img"),
+    )
     override fun popularMangaParse(response: Response): MangasPage {
         cacheAssistant()
-        return searchMangaParse(response)
+        return super.popularMangaParse(response)
     }
-    override fun popularMangaNextPageSelector() = throw UnsupportedOperationException()
-    override fun popularMangaSelector() = throw UnsupportedOperationException()
-    override fun popularMangaFromElement(element: Element) = throw UnsupportedOperationException()
 
     // Latest
     @SuppressLint("DefaultLocale")
@@ -65,7 +68,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
-    override fun latestUpdatesSelector() = "article"
+    override fun latestUpdatesSelector() = "div.content-archive article.post:not(.category-video)"
     override fun latestUpdatesFromElement(element: Element) = buildManga(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
     override fun latestUpdatesParse(response: Response): MangasPage {
         cacheAssistant()

@@ -275,8 +275,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         Pair("categories", "$baseUrl/cats/"),
         Pair("pairings", "$baseUrl/pairing/"),
         Pair("groups", "$baseUrl/group/"),
-        Pair("artist", "$baseUrl/artist/"),
-        Pair("status", "$baseUrl/status/"),
     )
 
     // Generates the filter lists for app
@@ -289,8 +287,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
             PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
             ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
-            StatusFilter(returnFilter(cachedPagesUrls["status"]!!, ".links a")),
-            CircleFilter(returnFilter(cachedPagesUrls["circle"]!!, ".links a")),
         )
     }
 
@@ -306,8 +302,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf("Any", *CATID))
     private class PairingFilter(PAIR: Array<String>) : UriSelectFilter("Pairing", "pairing_str", arrayOf("Any", *PAIR))
     private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
-    private class StatusFilter(STATUS: Array<String>) : UriSelectFilter("Status", "ep_filter_status", arrayOf("Any", *STATUS))
-    private class CircleFilter(CIRCLE: Array<String>) : UriSelectFilter("Circle/Artist", "ep_filter_artist", arrayOf("Any", *CIRCLE))
     private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
     /**

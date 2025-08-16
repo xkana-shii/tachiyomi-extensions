@@ -47,7 +47,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Popular
     override fun popularMangaRequest(page: Int): Request {
-        return GET("$baseUrl/popular" + if (page > 1) "/page/$page/" else "/", headers)
+        return GET("$baseUrl/popular/", headers)
     }
 
     override fun popularMangaNextPageSelector() = "li.pagination-next"
@@ -275,6 +275,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         Pair("categories", "$baseUrl/cats/"),
         Pair("pairings", "$baseUrl/pairing/"),
         Pair("groups", "$baseUrl/group/"),
+        Pair("artist", "$baseUrl/artist/"),
+        Pair("status", "$baseUrl/status/"),
     )
 
     // Generates the filter lists for app
@@ -287,21 +289,25 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
             PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
             ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
+            StatusFilter(returnFilter(cachedPagesUrls["status"]!!, ".links a")),
+            CircleFilter(returnFilter(cachedPagesUrls["circle"]!!, ".links a")),
         )
     }
 
     private class EnforceLanguageFilter(val siteLang: String) : Filter.CheckBox("Enforce language", true), UriFilter {
         fun indexModifier() = if (state) 0 else 1
         override fun addToUri(uri: Uri.Builder, uriParam: String) {
-            if (state) uri.appendQueryParameter(uriParam, "lang_str:$siteLang")
+            if (state) uri.appendQueryParameter(uriParam, "ep_filter_lang=$siteLang")
         }
     }
 
-    private class GenreFilter(GENRES: Array<String>) : UriSelectFilter("Genre", "genre_str", arrayOf("Any", *GENRES))
-    private class TagFilter(POPTAG: Array<String>) : UriSelectFilter("Popular Tags", "tags", arrayOf("Any", *POPTAG))
-    private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "categories", arrayOf("Any", *CATID))
+    private class GenreFilter(GENRES: Array<String>) : UriSelectFilter("Genre", "ep_filter_genre", arrayOf("Any", *GENRES))
+    private class TagFilter(POPTAG: Array<String>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", arrayOf("Any", *POPTAG))
+    private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf("Any", *CATID))
     private class PairingFilter(PAIR: Array<String>) : UriSelectFilter("Pairing", "pairing_str", arrayOf("Any", *PAIR))
     private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
+    private class StatusFilter(STATUS: Array<String>) : UriSelectFilter("Status", "ep_filter_status", arrayOf("Any", *STATUS))
+    private class CircleFilter(CIRCLE: Array<String>) : UriSelectFilter("Circle/Artist", "ep_filter_artist", arrayOf("Any", *CIRCLE))
     private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
     /**

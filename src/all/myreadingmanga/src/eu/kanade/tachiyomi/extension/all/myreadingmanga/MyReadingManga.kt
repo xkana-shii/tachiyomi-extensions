@@ -84,27 +84,33 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             if (filter is UriFilter) {
                 filter.addToUri(uri, "wpsolr_fq[${i - indexModifier}]")
             }
-            if (filter is SearchSortTypeList) {
-                uri.appendQueryParameter("wpsolr_sort", listOf("sort_by_date_desc", "sort_by_date_asc", "sort_by_random", "sort_by_relevancy_desc")[filter.state])
-            }
         }
         uri.appendQueryParameter("wpsolr_page", page.toString())
 
         return GET(uri.toString(), headers)
     }
 
-    override fun searchMangaNextPageSelector(): String? = throw UnsupportedOperationException()
-    override fun searchMangaSelector() = "div.results-by-facets div[id*=res]"
+    override fun searchMangaNextPageSelector() = "div.archive-pagination li.pagination-next a"
+    override fun searchMangaSelector() = "div.content-archive article.post"
     private var mangaParsedSoFar = 0
     override fun searchMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        if (document.location().contains("page=1")) mangaParsedSoFar = 0
+        val currentUrl = document.location() // Get current URL
+        if (!currentUrl.contains("/page/") || currentUrl.contains("/page/1/")) {
+            mangaParsedSoFar = 0
+        }
+
         val mangas = document.select(searchMangaSelector()).map { searchMangaFromElement(it) }
             .also { mangaParsedSoFar += it.count() }
-        val totalResults = Regex("""(\d+)""").find(document.select("div.res_info").text())?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        return MangasPage(mangas, mangaParsedSoFar < totalResults)
+
+        val totalResultsText = document.select("h2.ep-search-count").first()?.text()
+        val totalResults = totalResultsText?.let { Regex("""(\d+)""").find(it)?.groupValues?.get(1)?.toIntOrNull() } ?: 0
+
+        val hasNextPage = if (mangas.isEmpty()) false else mangaParsedSoFar < totalResults
+
+        return MangasPage(mangas, hasNextPage)
     }
-    override fun searchMangaFromElement(element: Element) = buildManga(element.select("a").first()!!, element.select("img").first())
+    override fun searchMangaFromElement(element: Element) = buildManga(element.select("h2.entry-title a.entry-title-link").first()!!, element.select("a.entry-image-link img.post-image").first())
 
     // Build Manga From Element
     private fun buildManga(titleElement: Element, thumbnailElement: Element?): SManga {
@@ -278,7 +284,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun getFilterList(): FilterList {
         return FilterList(
             EnforceLanguageFilter(siteLang),
-            SearchSortTypeList(),
             GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
             TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")),
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
@@ -299,7 +304,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf("Any", *CATID))
     private class PairingFilter(PAIR: Array<String>) : UriSelectFilter("Pairing", "pairing_str", arrayOf("Any", *PAIR))
     private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
-    private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
     /**
      * Class that creates a select filter. Each entry in the dropdown has a name and a display name.

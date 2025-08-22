@@ -133,7 +133,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun popularMangaNextPageSelector() = "li.pagination-next"
-    override fun popularMangaSelector() = "div.entry-content ul.wpp-list > li"
+    override fun popularMangaSelector() = "div.entry-content ul.wpp-list > li:not(:has(img[src*=vlcsnap]))"
     override fun popularMangaFromElement(element: Element) = buildManga(element.select(".wpp-post-title").first()!!, element.select("img.wpp-thumbnail").first())
     override fun popularMangaParse(response: Response): MangasPage {
         cacheAssistant()

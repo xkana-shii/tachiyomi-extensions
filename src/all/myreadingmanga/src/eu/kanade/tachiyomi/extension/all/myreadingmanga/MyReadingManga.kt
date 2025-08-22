@@ -1,10 +1,18 @@
 package eu.kanade.tachiyomi.extension.all.myreadingmanga
 
 import android.annotation.SuppressLint
+import android.app.Application
+import android.content.SharedPreferences
 import android.net.Uri
+import android.util.Log
 import android.webkit.URLUtil
+import android.widget.Toast
+import androidx.preference.EditTextPreference
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -13,17 +21,21 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import okhttp3.FormBody
 import okhttp3.Headers
+import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedHttpSource() {
+open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedHttpSource(), ConfigurableSource {
 
     // Basic Info
     override val name = "MyReadingManga"
@@ -32,6 +44,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         super.headersBuilder()
             .set("User-Agent", USER_AGENT)
             .add("X-Requested-With", randomString((1..20).random()))
+
+    private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
+    private val credentials: Credential get() = Credential(
+        email = preferences.getString(USERNAME_PREF, "") ?: "",
+        password = preferences.getString(PASSWORD_PREF, "") ?: "",
+    )
+    private data class Credential(val email: String, val password: String)
+
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
@@ -41,9 +61,74 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
+        .addInterceptor(::loginInterceptor)
         .build()
 
     override val supportsLatest = true
+
+    // Login Interceptor
+    private fun loginInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+
+        if (credentials.email.isBlank() || credentials.password.isBlank()) {
+            Log.d(TAG, "No credentials found, proceeding without login.")
+            return chain.proceed(request)
+        }
+
+        try {
+            Log.d(TAG, "Attempting to log in with email: ${credentials.email}")
+            val loginForm = FormBody.Builder()
+                .add("log", credentials.email)
+                .add("pwd", credentials.password)
+                .add("wp-submit", "Log In")
+                .add("redirect_to", "$baseUrl/")
+                .add("testcookie", "1")
+                .build()
+
+            val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
+            val loginResponse = network.cloudflareClient.newCall(loginRequest).execute()
+
+            if (loginResponse.isSuccessful) {
+                val cookies = loginResponse.headers("Set-Cookie").joinToString("; ")
+                Log.d(TAG, "Login successful! Received cookies: $cookies")
+                return chain.proceed(request)
+            } else {
+                Log.e(TAG, "Login failed. HTTP status code: ${loginResponse.code}")
+                Log.e(TAG, "Response body: ${loginResponse.body.string()}")
+            }
+            return chain.proceed(request)
+        } catch (e: Exception) {
+            Log.e(TAG, "An error occurred during login", e)
+            return chain.proceed(request)
+        }
+    }
+
+    // Preference Screen
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val application = Injekt.get<Application>()
+        val usernamePref = EditTextPreference(screen.context).apply {
+            key = USERNAME_PREF
+            title = "Email"
+            summary = "Enter your MyReadingManga.info email"
+            dialogMessage = "Your email address for MyReadingManga.info"
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
+            }
+        }
+        val passwordPref = EditTextPreference(screen.context).apply {
+            key = PASSWORD_PREF
+            title = "Password"
+            summary = "Enter your MyReadingManga.info password"
+            dialogMessage = "Your password for MyReadingManga.info"
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
+            }
+        }
+        screen.addPreference(usernamePref)
+        screen.addPreference(passwordPref)
+    }
 
     // Popular
     override fun popularMangaRequest(page: Int): Request {
@@ -95,7 +180,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private var mangaParsedSoFar = 0
     override fun searchMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        val currentUrl = document.location() // Get current URL
+        val currentUrl = document.location()
         if (!currentUrl.contains("/page/") || currentUrl.contains("/page/1/")) {
             mangaParsedSoFar = 0
         }
@@ -343,6 +428,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     companion object {
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
+        private const val USERNAME_PREF = "MYREADINGMANGA_USERNAME"
+        private const val PASSWORD_PREF = "MYREADINGMANGA_PASSWORD"
+        private const val TAG = "MyReadingMangaLogin"
     }
 
     private fun randomString(length: Int): String {

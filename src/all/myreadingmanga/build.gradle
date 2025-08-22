@@ -1,7 +1,7 @@
 ext {
     extName = 'MyReadingManga'
     extClass = '.MyReadingMangaFactory'
-    extVersionCode = 62
+    extVersionCode = 64
     isNsfw = true
 }
 

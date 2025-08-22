@@ -347,7 +347,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             null
         } else {
             filtersCached = true
-            Jsoup.parse(filterMap[url]!!)
+            filterMap[url]?.let { Jsoup.parse(it) }
         }
         return document?.select(css)?.map { it.text() }?.toTypedArray()
             ?: arrayOf("Press 'Reset' to load filters")

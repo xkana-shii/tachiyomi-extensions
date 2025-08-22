@@ -46,10 +46,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     private val credentials: Credential get() = Credential(
-        email = preferences.getString(USERNAME_PREF, "") ?: "",
+        username = preferences.getString(USERNAME_PREF, "") ?: "",
         password = preferences.getString(PASSWORD_PREF, "") ?: "",
     )
-    private data class Credential(val email: String, val password: String)
+    private data class Credential(val username: String, val password: String)
     private var isLoggedIn: Boolean = false
 
     override val client = network.cloudflareClient.newBuilder()
@@ -70,7 +70,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private fun loginInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
 
-        if (credentials.email.isBlank() || credentials.password.isBlank()) {
+        if (credentials.username.isBlank() || credentials.password.isBlank()) {
             return chain.proceed(request)
         }
 
@@ -80,7 +80,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
         try {
             val loginForm = FormBody.Builder()
-                .add("log", credentials.email)
+                .add("log", credentials.username)
                 .add("pwd", credentials.password)
                 .add("wp-submit", "Log In")
                 .add("redirect_to", "$baseUrl/")
@@ -107,9 +107,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val application = Injekt.get<Application>()
         val usernamePref = EditTextPreference(screen.context).apply {
             key = USERNAME_PREF
-            title = "Email"
-            summary = "Enter your MyReadingManga.info email"
-            dialogMessage = "Your email address for MyReadingManga.info"
+            title = "Username"
+            summary = "Enter your username"
             setOnPreferenceChangeListener { _, _ ->
                 Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
                 true
@@ -118,8 +117,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val passwordPref = EditTextPreference(screen.context).apply {
             key = PASSWORD_PREF
             title = "Password"
-            summary = "Enter your MyReadingManga.info password"
-            dialogMessage = "Your password for MyReadingManga.info"
+            summary = "Enter your password"
             setOnPreferenceChangeListener { _, _ ->
                 Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
                 true

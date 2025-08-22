@@ -1,7 +1,8 @@
 ext {
+    kmkBaseVersionCode = 1
     extName = 'MyReadingManga'
     extClass = '.MyReadingMangaFactory'
-    extVersionCode = 66
+    extVersionCode = 58
     isNsfw = true
 }
 

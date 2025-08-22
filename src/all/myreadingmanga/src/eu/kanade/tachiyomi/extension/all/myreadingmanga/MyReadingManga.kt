@@ -53,7 +53,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private data class Credential(val email: String, val password: String)
     private var isLoggedIn: Boolean = false
 
-
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()

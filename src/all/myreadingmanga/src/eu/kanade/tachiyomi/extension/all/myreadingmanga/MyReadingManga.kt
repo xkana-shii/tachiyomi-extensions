@@ -174,7 +174,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     override fun searchMangaNextPageSelector() = "div.archive-pagination li.pagination-next a"
-    override fun searchMangaSelector() = "div.content-archive article.post"
+    override fun searchMangaSelector() = "div.content-archive article.post:not(.category-video)"
     private var mangaParsedSoFar = 0
     override fun searchMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()

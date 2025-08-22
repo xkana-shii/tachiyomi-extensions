@@ -156,18 +156,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Search
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val filterList = if (filters.isEmpty()) getFilterList() else filters
-        // whether enforce language is true will change the index of the loop below
-        val indexModifier = filterList.filterIsInstance<EnforceLanguageFilter>().first().indexModifier()
+        val uri = if (page > 1) {
+            Uri.parse("$baseUrl/page/$page/").buildUpon()
+        } else {
+            Uri.parse("$baseUrl/").buildUpon()
+        }
 
-        val uri = Uri.parse("$baseUrl/search/").buildUpon()
-            .appendQueryParameter("wpsolr_q", query)
-        filterList.forEachIndexed { i, filter ->
+        uri.appendQueryParameter("s", query)
+
+        filters.forEach { filter ->
             if (filter is UriFilter) {
-                filter.addToUri(uri, "wpsolr_fq[${i - indexModifier}]")
+                filter.addToUri(uri)
             }
         }
-        uri.appendQueryParameter("wpsolr_page", page.toString())
 
         return GET(uri.toString(), headers)
     }
@@ -341,7 +342,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     // Parses cached page for filters
-    private fun returnFilter(url: String, css: String): Array<String> {
+    private fun returnFilter(url: String, css: String): Array<Pair<String, String>> {
         val document = if (filterMap.isNullOrEmpty()) {
             filtersCached = false
             null
@@ -349,70 +350,36 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             filterMap[url]?.let { Jsoup.parse(it) }
         }
-        return document?.select(css)?.map { it.text() }?.toTypedArray()
-            ?: arrayOf("Press 'Reset' to load filters")
+        // New scraping logic to get both name and slug.
+        return document?.select(css)?.map { element ->
+            val name = element.select("a").text().substringBefore(" (").trim()
+            val slug = element.attr("data-term-slug").trim()
+            Pair(name, slug)
+        }?.toTypedArray() ?: arrayOf(Pair("Press 'Reset' to load filters", ""))
     }
 
     // URLs for the pages we need to cache
     private val cachedPagesUrls = hashMapOf(
         Pair("genres", baseUrl),
         Pair("tags", baseUrl),
-        Pair("categories", "$baseUrl/cats/"),
-        Pair("pairings", "$baseUrl/pairing/"),
-        Pair("groups", "$baseUrl/group/"),
+        Pair("categories", baseUrl),
+        Pair("artists", baseUrl),
     )
 
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
         return FilterList(
             EnforceLanguageFilter(siteLang),
-            GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
-            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tagcloud a[href*=/tag/]")),
-            CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".links a")),
-            PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".links a")),
-            ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".links a")),
+            GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, "div[data-facet=genre] .term")),
+            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, "div[data-facet=post_tag] .term")),
+            CatFilter(returnFilter(cachedPagesUrls["categories"]!!, "div[data-facet=category] .term")),
+            ArtistFilter(returnFilter(cachedPagesUrls["artists"]!!, "div[data-facet=artist] .term")),
         )
     }
 
     private class EnforceLanguageFilter(val siteLang: String) : Filter.CheckBox("Enforce language", true), UriFilter {
-        fun indexModifier() = if (state) 0 else 1
-        override fun addToUri(uri: Uri.Builder, uriParam: String) {
-            if (state) uri.appendQueryParameter(uriParam, "ep_filter_lang=$siteLang")
-        }
-    }
-
-    private class GenreFilter(GENRES: Array<String>) : UriSelectFilter("Genre", "ep_filter_genre", arrayOf("Any", *GENRES))
-    private class TagFilter(POPTAG: Array<String>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", arrayOf("Any", *POPTAG))
-    private class CatFilter(CATID: Array<String>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf("Any", *CATID))
-    private class PairingFilter(PAIR: Array<String>) : UriSelectFilter("Pairing", "pairing_str", arrayOf("Any", *PAIR))
-    private class ScanGroupFilter(GROUP: Array<String>) : UriSelectFilter("Scanlation Group", "group_str", arrayOf("Any", *GROUP))
-
-    /**
-     * Class that creates a select filter. Each entry in the dropdown has a name and a display name.
-     * If an entry is selected it is appended as a query parameter onto the end of the URI.
-     * If `firstIsUnspecified` is set to true, if the first entry is selected, nothing will be appended on the the URI.
-     */
-    private open class UriSelectFilter(
-        displayName: String,
-        val uriValuePrefix: String,
-        val vals: Array<String>,
-        val firstIsUnspecified: Boolean = true,
-        defaultValue: Int = 0,
-    ) :
-        Filter.Select<String>(displayName, vals.map { it }.toTypedArray(), defaultValue), UriFilter {
-        override fun addToUri(uri: Uri.Builder, uriParam: String) {
-            if (state != 0 || !firstIsUnspecified) {
-                val splitFilter = vals[state].split(",")
-                when {
-                    splitFilter.size == 2 -> {
-                        val reversedFilter = splitFilter.reversed().joinToString(" | ").trim()
-                        uri.appendQueryParameter(uriParam, "$uriValuePrefix:$reversedFilter")
-                    }
-                    else -> {
-                        uri.appendQueryParameter(uriParam, "$uriValuePrefix:${vals[state]}")
-                    }
-                }
-            }
+        override fun addToUri(uri: Uri.Builder) {
+            if (state) uri.appendQueryParameter("ep_filter_lang", siteLang)
         }
     }
 
@@ -420,8 +387,28 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * Represents a filter that is able to modify a URI.
      */
     private interface UriFilter {
-        fun addToUri(uri: Uri.Builder, uriParam: String)
+        fun addToUri(uri: Uri.Builder)
     }
+
+    private open class UriSelectFilter(
+        displayName: String,
+        val uriParam: String,
+        val vals: Array<Pair<String, String>>,
+        val firstIsUnspecified: Boolean = true,
+        defaultValue: Int = 0,
+    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), defaultValue), UriFilter {
+        override fun addToUri(uri: Uri.Builder) {
+            if (state != 0 || !firstIsUnspecified) {
+                val selectedSlug = vals[state].second
+                uri.appendQueryParameter(uriParam, selectedSlug)
+            }
+        }
+    }
+
+    private class GenreFilter(GENRES: Array<Pair<String, String>>) : UriSelectFilter("Genre", "ep_filter_genre", arrayOf(Pair("Any", ""), *GENRES))
+    private class TagFilter(POPTAGS: Array<Pair<String, String>>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", arrayOf(Pair("Any", ""), *POPTAGS))
+    private class CatFilter(CATID: Array<Pair<String, String>>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf(Pair("Any", ""), *CATID))
+    private class ArtistFilter(ARTISTS: Array<Pair<String, String>>) : UriSelectFilter("Circle/ Artist", "ep_filter_artist", arrayOf(Pair("Any", ""), *ARTISTS))
 
     companion object {
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"

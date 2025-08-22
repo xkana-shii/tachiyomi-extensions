@@ -51,6 +51,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         password = preferences.getString(PASSWORD_PREF, "") ?: "",
     )
     private data class Credential(val email: String, val password: String)
+    private var isLoggedIn: Boolean = false
+
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
@@ -75,6 +77,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             return chain.proceed(request)
         }
 
+        if (isLoggedIn) {
+            Log.d(TAG, "Already logged in, skipping login attempt.")
+            return chain.proceed(request)
+        }
+
         try {
             Log.d(TAG, "Attempting to log in with email: ${credentials.email}")
             val loginForm = FormBody.Builder()
@@ -91,10 +98,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             if (loginResponse.isSuccessful) {
                 val cookies = loginResponse.headers("Set-Cookie").joinToString("; ")
                 Log.d(TAG, "Login successful! Received cookies: $cookies")
+                isLoggedIn = true
                 return chain.proceed(request)
             } else {
                 Log.e(TAG, "Login failed. HTTP status code: ${loginResponse.code}")
                 Log.e(TAG, "Response body: ${loginResponse.body.string()}")
+                Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
             }
             return chain.proceed(request)
         } catch (e: Exception) {

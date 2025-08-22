@@ -363,7 +363,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         Pair("genres", baseUrl),
         Pair("tags", baseUrl),
         Pair("categories", baseUrl),
-        Pair("pairings", baseUrl),
+        Pair("pairing", baseUrl),
         Pair("artists", baseUrl),
     )
 

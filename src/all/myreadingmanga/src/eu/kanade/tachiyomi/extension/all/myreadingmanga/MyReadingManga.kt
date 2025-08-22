@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
-import android.util.Log
 import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
@@ -72,17 +71,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val request = chain.request()
 
         if (credentials.email.isBlank() || credentials.password.isBlank()) {
-            Log.d(TAG, "No credentials found, proceeding without login.")
             return chain.proceed(request)
         }
 
         if (isLoggedIn) {
-            Log.d(TAG, "Already logged in, skipping login attempt.")
             return chain.proceed(request)
         }
 
         try {
-            Log.d(TAG, "Attempting to log in with email: ${credentials.email}")
             val loginForm = FormBody.Builder()
                 .add("log", credentials.email)
                 .add("pwd", credentials.password)
@@ -95,18 +91,13 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             val loginResponse = network.cloudflareClient.newCall(loginRequest).execute()
 
             if (loginResponse.isSuccessful) {
-                val cookies = loginResponse.headers("Set-Cookie").joinToString("; ")
-                Log.d(TAG, "Login successful! Received cookies: $cookies")
                 isLoggedIn = true
                 return chain.proceed(request)
             } else {
-                Log.e(TAG, "Login failed. HTTP status code: ${loginResponse.code}")
-                Log.e(TAG, "Response body: ${loginResponse.body.string()}")
                 Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
             }
             return chain.proceed(request)
         } catch (e: Exception) {
-            Log.e(TAG, "An error occurred during login", e)
             return chain.proceed(request)
         }
     }

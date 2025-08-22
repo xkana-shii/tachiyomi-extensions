@@ -1,16 +1,10 @@
 package eu.kanade.tachiyomi.extension.all.myreadingmanga
 
 import android.annotation.SuppressLint
-import android.app.Application
-import android.content.SharedPreferences
 import android.net.Uri
 import android.webkit.URLUtil
-import androidx.preference.EditTextPreference
-import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
-import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -19,21 +13,17 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
-import okhttp3.FormBody
 import okhttp3.Headers
-import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedHttpSource(), ConfigurableSource {
+open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedHttpSource() {
 
     // Basic Info
     override val name = "MyReadingManga"
@@ -42,47 +32,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         super.headersBuilder()
             .set("User-Agent", USER_AGENT)
             .add("X-Requested-With", randomString((1..20).random()))
-
-    // SharedPreferences for login credentials
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_myreadingmanga", 0x0000)
-    }
-
-    private val credentials: Credential get() = Credential(
-        email = preferences.getString(USERNAME_PREF, "") as String,
-        password = preferences.getString(PASSWORD_PREF, "") as String,
-    )
-
-    private val loginInterceptor: Interceptor by lazy {
-        return@lazy Interceptor { chain ->
-            val request = chain.request()
-            val sessionCookie = preferences.getString(SESSION_COOKIE_PREF, "") ?: ""
-
-            // If we have a stored session cookie, add it to the request
-            val newRequest = if (sessionCookie.isNotEmpty()) {
-                request.newBuilder().addHeader("Cookie", sessionCookie).build()
-            } else {
-                request
-            }
-
-            var response = chain.proceed(newRequest)
-
-            // If the request fails due to a permission issue (403 Forbidden), try to log in
-            if (!response.isSuccessful && response.code == 403 && credentials.isNotEmpty) {
-                response.close()
-                val newSessionCookie = doLogin()
-                if (newSessionCookie.isNotEmpty()) {
-                    preferences.edit().putString(SESSION_COOKIE_PREF, newSessionCookie).apply()
-                    val retryRequest = request.newBuilder()
-                        .addHeader("Cookie", newSessionCookie)
-                        .build()
-                    response = chain.proceed(retryRequest)
-                }
-            }
-            response
-        }
-    }
-
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
@@ -92,58 +41,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
             chain.proceed(request.newBuilder().headers(headers).build())
         }
-        .addInterceptor(loginInterceptor)
         .build()
 
     override val supportsLatest = true
-
-    private fun doLogin(): String {
-        val formBody = FormBody.Builder()
-            .add("log", credentials.email)
-            .add("pwd", credentials.password)
-            .add("wp-submit", "Log In")
-            .add("redirect_to", baseUrl)
-            .add("testcookie", "1")
-            .build()
-
-        val response = client.newCall(
-            POST(
-                "$baseUrl/wp-login.php",
-                headers,
-                formBody,
-            ),
-        ).execute()
-
-        return response.headers("Set-Cookie")
-            .firstOrNull { it.contains("wordpress_logged_in_", ignoreCase = true) }
-            ?.let { it.substringBefore(";") } ?: ""
-    }
-
-    override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        val usernamePref = EditTextPreference(screen.context).apply {
-            key = USERNAME_PREF
-            title = "Username"
-            summary = "Enter your MyReadingManga username"
-            dialogMessage = "This is required to access members-only content."
-            setDefaultValue("")
-        }
-
-        val passwordPref = EditTextPreference(screen.context).apply {
-            key = PASSWORD_PREF
-            title = "Password"
-            summary = "Enter your MyReadingManga password"
-            dialogMessage = "This is required to access members-only content."
-            setDefaultValue("")
-        }
-
-        screen.addPreference(usernamePref)
-        screen.addPreference(passwordPref)
-    }
-
-    private data class Credential(val email: String, val password: String) {
-        val isEmpty: Boolean get() = email.isBlank() || password.isBlank()
-        val isNotEmpty: Boolean get() = !isEmpty
-    }
 
     // Popular
     override fun popularMangaRequest(page: Int): Request {
@@ -442,9 +342,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     companion object {
-        private const val USERNAME_PREF = "MRM_USERNAME"
-        private const val PASSWORD_PREF = "MRM_PASSWORD"
-        private const val SESSION_COOKIE_PREF = "MRM_SESSION_COOKIE"
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
     }
 

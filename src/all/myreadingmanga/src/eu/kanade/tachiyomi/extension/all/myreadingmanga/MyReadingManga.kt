@@ -385,11 +385,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    private class GenreFilter(GENRES: Array<Pair<String, String>>) : UriSelectFilter("Genre", "ep_filter_genre", arrayOf(Pair("Any", ""), *GENRES))
-    private class TagFilter(POPTAGS: Array<Pair<String, String>>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", arrayOf(Pair("Any", ""), *POPTAGS))
-    private class CatFilter(CATID: Array<Pair<String, String>>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf(Pair("Any", ""), *CATID))
-    private class PairingFilter(PAIRING: Array<Pair<String, String>>) : UriSelectFilter("Pairing", "ep_filter_pairing", arrayOf(Pair("Any", ""), *PAIRING))
-    private class ArtistFilter(ARTISTS: Array<Pair<String, String>>) : UriSelectFilter("Circle/ Artist", "ep_filter_artist", arrayOf(Pair("Any", ""), *ARTISTS))
+    /**
+     * Represents a filter that is able to modify a URI.
+     */
+    private interface UriFilter {
+        fun addToUri(uri: Uri.Builder)
+    }
 
     private open class UriSelectFilter(
         displayName: String,
@@ -406,12 +407,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    /**
-     * Represents a filter that is able to modify a URI.
-     */
-    private interface UriFilter {
-        fun addToUri(uri: Uri.Builder)
-    }
+    private class GenreFilter(GENRES: Array<Pair<String, String>>) : UriSelectFilter("Genre", "ep_filter_genre", arrayOf(Pair("Any", ""), *GENRES))
+    private class TagFilter(POPTAGS: Array<Pair<String, String>>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", arrayOf(Pair("Any", ""), *POPTAGS))
+    private class CatFilter(CATID: Array<Pair<String, String>>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf(Pair("Any", ""), *CATID))
+    private class PairingFilter(PAIRING: Array<Pair<String, String>>) : UriSelectFilter("Pairing", "ep_filter_pairing", arrayOf(Pair("Any", ""), *PAIRING))
+    private class ArtistFilter(ARTISTS: Array<Pair<String, String>>) : UriSelectFilter("Circle/ Artist", "ep_filter_artist", arrayOf(Pair("Any", ""), *ARTISTS))
 
     companion object {
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"

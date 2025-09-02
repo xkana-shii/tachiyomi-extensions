@@ -10,7 +10,7 @@ import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -28,7 +28,6 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
@@ -224,14 +223,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private fun cleanTitle(title: String) = title.replace(titleRegex, "").substringBeforeLast("(").trim()
 
     // Manga Details
-    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
+    override suspend fun getMangaDetails(manga: SManga): SManga {
         val needCover = manga.thumbnail_url?.let { !client.newCall(GET(it, headers)).execute().isSuccessful } ?: true
 
-        return client.newCall(mangaDetailsRequest(manga))
-            .asObservableSuccess()
-            .map { response ->
-                mangaDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
-            }
+        val response = client.newCall(mangaDetailsRequest(manga)).await()
+        return mangaDetailsParse(response.asJsoup(), needCover).apply { initialized = true }
     }
 
     private fun mangaDetailsParse(document: Document, needCover: Boolean = true): SManga {

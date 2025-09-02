@@ -377,7 +377,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
         val parent = document?.select(".ep-filter-title")?.first { it.text() == filterTitle }?.parent()
         return parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
-            ?.filterNot { it.name == "Video" }
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
     }
 

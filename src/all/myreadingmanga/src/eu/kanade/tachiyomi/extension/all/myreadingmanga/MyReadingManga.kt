@@ -321,23 +321,102 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // ========== FILTERS ==========
 
+    // ========== DYNAMIC XML SITEMAP FILTERS ==========
     private var genresSitemap: List<MrmFilter>? = null
+    private var categoriesSitemap: List<MrmFilter>? = null
+    private var pairingsSitemap: List<MrmFilter>? = null
+    private var postTagSitemap: List<MrmFilter>? = null
+    private var artistsSitemap: List<MrmFilter>? = null
+    private var statusSitemap: List<MrmFilter>? = null
+
+    private fun getSitemapUrls(type: String): List<String> {
+        val indexUrl = "$baseUrl/sitemap_index.xml"
+        val response = client.newCall(GET(indexUrl, headers)).execute()
+        val xml = response.body.string()
+        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
+        return doc.select("sitemap > loc")
+            .map { it.text() }
+            .filter { it.contains("$type-sitemap") }
+    }
 
     private fun getGenresFromXmlSitemap(): List<MrmFilter> {
         if (genresSitemap != null) return genresSitemap!!
-        val genreSitemapUrl = "$baseUrl/genre-sitemap.xml"
-        val response = client.newCall(GET(genreSitemapUrl, headers)).execute()
+        val urls = getSitemapUrls("genre")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        genresSitemap = all
+        return genresSitemap!!
+    }
+
+    private fun getCategoriesFromXmlSitemap(): List<MrmFilter> {
+        if (categoriesSitemap != null) return categoriesSitemap!!
+        val urls = getSitemapUrls("category")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        categoriesSitemap = all
+        return categoriesSitemap!!
+    }
+
+    private fun getPairingsFromXmlSitemap(): List<MrmFilter> {
+        if (pairingsSitemap != null) return pairingsSitemap!!
+        val urls = getSitemapUrls("pairing")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        pairingsSitemap = all
+        return pairingsSitemap!!
+    }
+
+    private fun getPostTagsFromXmlSitemap(): List<MrmFilter> {
+        if (postTagSitemap != null) return postTagSitemap!!
+        val urls = getSitemapUrls("post_tag")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        postTagSitemap = all
+        return postTagSitemap!!
+    }
+
+    private fun getArtistsFromXmlSitemaps(): List<MrmFilter> {
+        if (artistsSitemap != null) return artistsSitemap!!
+        val urls = getSitemapUrls("artist")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        artistsSitemap = all
+        return artistsSitemap!!
+    }
+
+    private fun getStatusFromXmlSitemap(): List<MrmFilter> {
+        if (statusSitemap != null) return statusSitemap!!
+        val urls = getSitemapUrls("status")
+        val all = mutableListOf<MrmFilter>()
+        for (url in urls) {
+            try { all += fetchSitemap(url) } catch (_: Exception) {}
+        }
+        statusSitemap = all
+        return statusSitemap!!
+    }
+
+    // Helper for all the XML sitemaps
+    private fun fetchSitemap(sitemapUrl: String): List<MrmFilter> {
+        val response = client.newCall(GET(sitemapUrl, headers)).execute()
         val xml = response.body.string()
         val doc = Jsoup.parse(xml, "", Parser.xmlParser())
         val urls = doc.select("url > loc")
-        val result = urls.map { locElem ->
+        return urls.map { locElem ->
             val url = locElem.text()
             val slug = url.trimEnd('/').split("/").last()
             val name = slug.replace("-", " ").replaceFirstChar { it.uppercase() }
             MrmFilter(name, slug)
         }
-        genresSitemap = result
-        return result
     }
 
     private var filtersCached = false
@@ -387,22 +466,57 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
     }
 
+    /*
+     * ========== Filter toggles ==========
+     */
+
+    private class UseHtmlFiltersToggle : Filter.CheckBox("Use site filters (main/search page)", false)
+
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
+        val filters = mutableListOf<Filter<*>>()
+        filters += EnforceLanguageFilter(siteLang)
+        filters += UseHtmlFiltersToggle()
+        // Check toggle state to select filter source
+        val useHtmlFilters = (filters[1] as UseHtmlFiltersToggle).state
+
         val genres = try {
-            getGenresFromXmlSitemap()
+            if (useHtmlFilters) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromMainPage("Genres")
         }
-        return FilterList(
-            EnforceLanguageFilter(siteLang),
-            GenreFilter(genres),
-            CatFilter(getFiltersFromSearchPage("Category")),
-            TagFilter(getFiltersFromSearchPage("Tag")),
-            ArtistFilter(getFiltersFromSearchPage("Circle/ artist")),
-            PairingFilter(getFiltersFromSearchPage("Pairing")),
-            StatusFilter(getFiltersFromSearchPage("Status")),
-        )
+        val categories = try {
+            if (useHtmlFilters) getFiltersFromMainPage("Category") else getCategoriesFromXmlSitemap()
+        } catch (_: Exception) {
+            getFiltersFromMainPage("Category")
+        }
+        val pairings = try {
+            if (useHtmlFilters) getFiltersFromSearchPage("Pairing") else getPairingsFromXmlSitemap()
+        } catch (_: Exception) {
+            getFiltersFromSearchPage("Pairing")
+        }
+        val postTags = try {
+            if (useHtmlFilters) getFiltersFromSearchPage("Tag") else getPostTagsFromXmlSitemap()
+        } catch (_: Exception) {
+            getFiltersFromSearchPage("Tag")
+        }
+        val artists = try {
+            if (useHtmlFilters) getFiltersFromSearchPage("Circle/ artist") else getArtistsFromXmlSitemaps()
+        } catch (_: Exception) {
+            getFiltersFromSearchPage("Circle/ artist")
+        }
+        val statuses = try {
+            if (useHtmlFilters) getFiltersFromSearchPage("Status") else getStatusFromXmlSitemap()
+        } catch (_: Exception) {
+            getFiltersFromSearchPage("Status")
+        }
+        filters += GenreFilter(genres)
+        filters += CatFilter(categories)
+        filters += TagFilter(postTags)
+        filters += ArtistFilter(artists)
+        filters += PairingFilter(pairings)
+        filters += StatusFilter(statuses)
+        return FilterList(filters)
     }
 
     private class EnforceLanguageFilter(val siteLang: String) : Filter.CheckBox("Enforce language", true), UriFilter {
@@ -412,10 +526,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     private class GenreFilter(GENRES: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", GENRES)
-    private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Popular Categories", "ep_filter_category", CATID)
-    private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", POPTAG)
-    private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Popular Artists", "ep_filter_artist", POPART)
-    private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Popular Pairings", "ep_filter_pairing", PAIR)
+    private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Category", "ep_filter_category", CATID)
+    private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Tag", "ep_filter_post_tag", POPTAG)
+    private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Artist", "ep_filter_artist", POPART)
+    private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Pairing", "ep_filter_pairing", PAIR)
     private class StatusFilter(STATUS: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", STATUS)
 
     private class MrmFilter(name: String, val value: String) : Filter.CheckBox(name)

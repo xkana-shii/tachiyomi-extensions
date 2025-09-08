@@ -462,7 +462,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class UseHtmlFiltersToggle(
         prefs: SharedPreferences,
         key: String,
-        default: Boolean
+        default: Boolean,
     ) : Filter.CheckBox("Use site filters (main/search page)", prefs.getBoolean(key, default)) {
         private val prefKey = key
         private val preferences = prefs

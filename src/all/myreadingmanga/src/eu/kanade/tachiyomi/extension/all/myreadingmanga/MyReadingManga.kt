@@ -390,7 +390,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
         val genres = try {
-            getGenresFromSitemap()
+            getGenresFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromMainPage("Genres")
         }

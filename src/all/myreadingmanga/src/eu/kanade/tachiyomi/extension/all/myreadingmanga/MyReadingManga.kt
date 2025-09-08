@@ -149,7 +149,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      */
     @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers) // Home Page - Latest Manga
+        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers)
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
@@ -340,69 +340,57 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
 
     private fun getGenresFromXmlSitemap(): List<MrmFilter> {
-        if (genresSitemap != null) return genresSitemap!!
         val urls = getSitemapUrls("genre")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        genresSitemap = all
-        return genresSitemap!!
+        return all
     }
 
     private fun getCategoriesFromXmlSitemap(): List<MrmFilter> {
-        if (categoriesSitemap != null) return categoriesSitemap!!
         val urls = getSitemapUrls("category")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        categoriesSitemap = all
-        return categoriesSitemap!!
+        return all
     }
 
     private fun getPairingsFromXmlSitemap(): List<MrmFilter> {
-        if (pairingsSitemap != null) return pairingsSitemap!!
         val urls = getSitemapUrls("pairing")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        pairingsSitemap = all
-        return pairingsSitemap!!
+        return all
     }
 
     private fun getPostTagsFromXmlSitemap(): List<MrmFilter> {
-        if (postTagSitemap != null) return postTagSitemap!!
         val urls = getSitemapUrls("post_tag")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        postTagSitemap = all
-        return postTagSitemap!!
+        return all
     }
 
     private fun getArtistsFromXmlSitemaps(): List<MrmFilter> {
-        if (artistsSitemap != null) return artistsSitemap!!
         val urls = getSitemapUrls("artist")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        artistsSitemap = all
-        return artistsSitemap!!
+        return all
     }
 
     private fun getStatusFromXmlSitemap(): List<MrmFilter> {
-        if (statusSitemap != null) return statusSitemap!!
         val urls = getSitemapUrls("status")
         val all = mutableListOf<MrmFilter>()
         for (url in urls) {
             try { all += fetchSitemap(url) } catch (_: Exception) {}
         }
-        statusSitemap = all
-        return statusSitemap!!
+        return all
     }
 
     // Helper for all the XML sitemaps
@@ -470,15 +458,38 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * ========== Filter toggles ==========
      */
 
-    private class UseHtmlFiltersToggle : Filter.CheckBox("Use site filters (main/search page)", false)
+    // Persistent non-resettable toggle for site filters
+    private class UseHtmlFiltersToggle(
+        prefs: SharedPreferences,
+        key: String,
+        default: Boolean
+    ) : Filter.CheckBox("Use site filters (main/search page)", prefs.getBoolean(key, default)) {
+        private val prefKey = key
+        private val preferences = prefs
+
+        // Always persist state to SharedPreferences
+        override fun setState(newState: Boolean) {
+            super.setState(newState)
+            preferences.edit().putBoolean(prefKey, newState).apply()
+        }
+
+        // Prevent reset from changing state
+        override fun reset() {
+            // Do nothing, state stays as persisted
+        }
+    }
 
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
+        val useHtmlFiltersPrefKey = "USE_HTML_FILTERS"
+        val useHtmlFiltersDefault = false
+        val htmlFiltersToggle = UseHtmlFiltersToggle(preferences, useHtmlFiltersPrefKey, useHtmlFiltersDefault)
         val filters = mutableListOf<Filter<*>>()
         filters += EnforceLanguageFilter(siteLang)
-        filters += UseHtmlFiltersToggle()
-        // Check toggle state to select filter source
-        val useHtmlFilters = (filters[1] as UseHtmlFiltersToggle).state
+        filters += htmlFiltersToggle
+
+        // Determine which filters to use based on the persistent toggle
+        val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
 
         val genres = try {
             if (useHtmlFilters) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
@@ -525,6 +536,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
+    // Sitemap filters are resettable by default
+    private class MrmFilter(name: String, val value: String) : Filter.CheckBox(name, false)
+
     private class GenreFilter(GENRES: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", GENRES)
     private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Category", "ep_filter_category", CATID)
     private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Tag", "ep_filter_post_tag", POPTAG)
@@ -532,11 +546,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Pairing", "ep_filter_pairing", PAIR)
     private class StatusFilter(STATUS: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", STATUS)
 
-    private class MrmFilter(name: String, val value: String) : Filter.CheckBox(name)
     private open class UriSelectFilter(
         displayName: String,
         val uriParam: String,
-        val vals: List<MrmFilter>,
+        vals: List<MrmFilter>,
     ) : Filter.Group<MrmFilter>(displayName, vals), UriFilter {
         override fun addToUri(uri: Uri.Builder) {
             val checked = state.filter { it.state }.ifEmpty { return }

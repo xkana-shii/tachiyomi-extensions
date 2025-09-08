@@ -459,65 +459,48 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      */
 
     // Persistent non-resettable toggle for site filters
-    private class UseHtmlFiltersToggle(
-        prefs: SharedPreferences,
-        key: String,
-        default: Boolean,
-    ) : Filter.CheckBox("Use site filters (main/search page)", prefs.getBoolean(key, default)) {
-        private val prefKey = key
-        private val preferences = prefs
-
-        // Always persist state to SharedPreferences
-        override fun setState(newState: Boolean) {
-            super.setState(newState)
-            preferences.edit().putBoolean(prefKey, newState).apply()
-        }
-
-        // Prevent reset from changing state
-        override fun reset() {
-            // Do nothing, state stays as persisted
-        }
-    }
+    private class UseHtmlFiltersToggle(initialState: Boolean) : Filter.CheckBox("Use site filters (main/search page)", initialState)
 
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
         val useHtmlFiltersPrefKey = "USE_HTML_FILTERS"
         val useHtmlFiltersDefault = false
-        val htmlFiltersToggle = UseHtmlFiltersToggle(preferences, useHtmlFiltersPrefKey, useHtmlFiltersDefault)
+        val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
+        val htmlFiltersToggle = UseHtmlFiltersToggle(useHtmlFilters)
         val filters = mutableListOf<Filter<*>>()
         filters += EnforceLanguageFilter(siteLang)
         filters += htmlFiltersToggle
 
-        // Determine which filters to use based on the persistent toggle
-        val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
+        // Use the persistent value from SharedPreferences for logic
+        val useHtmlFiltersForLogic = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
 
         val genres = try {
-            if (useHtmlFilters) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromMainPage("Genres")
         }
         val categories = try {
-            if (useHtmlFilters) getFiltersFromMainPage("Category") else getCategoriesFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromMainPage("Category") else getCategoriesFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromMainPage("Category")
         }
         val pairings = try {
-            if (useHtmlFilters) getFiltersFromSearchPage("Pairing") else getPairingsFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Pairing") else getPairingsFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromSearchPage("Pairing")
         }
         val postTags = try {
-            if (useHtmlFilters) getFiltersFromSearchPage("Tag") else getPostTagsFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Tag") else getPostTagsFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromSearchPage("Tag")
         }
         val artists = try {
-            if (useHtmlFilters) getFiltersFromSearchPage("Circle/ artist") else getArtistsFromXmlSitemaps()
+            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Circle/ artist") else getArtistsFromXmlSitemaps()
         } catch (_: Exception) {
             getFiltersFromSearchPage("Circle/ artist")
         }
         val statuses = try {
-            if (useHtmlFilters) getFiltersFromSearchPage("Status") else getStatusFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Status") else getStatusFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromSearchPage("Status")
         }

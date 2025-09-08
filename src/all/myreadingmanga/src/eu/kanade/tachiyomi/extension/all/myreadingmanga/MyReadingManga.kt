@@ -329,6 +329,28 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * TODO : MRM have a meta sitemap (https://myreadingmanga.info/sitemap_index.xml) that links to
      * tag/genre/pairing/etc xml sitemaps. Filters could be populated from those instead of HTML pages
      */
+
+    // --- DYNAMIC GENRE FILTER FROM SITEMAP ---
+    private var genresSitemap: List<MrmFilter>? = null
+
+    private fun getGenresFromSitemap(): List<MrmFilter> {
+        if (genresSitemap != null) return genresSitemap!!
+
+        val genreSitemapUrl = "$baseUrl/genre-sitemap/"
+        val response = client.newCall(GET(genreSitemapUrl, headers)).execute()
+        val html = response.body.string()
+        val doc = Jsoup.parse(html)
+        val genreElements = doc.select("#sitemap tbody tr td a[href*=/genre/]")
+        val result = genreElements.map { a ->
+            val url = a.attr("href")
+            val slug = url.trimEnd('/').split("/").last()
+            val name = slug.replace("-", " ").replaceFirstChar { it.uppercase() }
+            MrmFilter(name, slug)
+        }
+        genresSitemap = result
+        return result
+    }
+
     private var filtersCached = false
     private var mainPage = ""
     private var searchPage = ""
@@ -378,9 +400,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
+        val genres = try {
+            getGenresFromSitemap()
+        } catch (_: Exception) {
+            getFiltersFromMainPage("Genres")
+        }
         return FilterList(
             EnforceLanguageFilter(siteLang),
-            GenreFilter(getFiltersFromMainPage("Genres")),
+            GenreFilter(genres),
             CatFilter(getFiltersFromSearchPage("Category")),
             TagFilter(getFiltersFromSearchPage("Tag")),
             ArtistFilter(getFiltersFromSearchPage("Circle/ artist")),

@@ -28,6 +28,7 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
@@ -318,31 +319,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
-    /*
-     * ========== Parse filters from pages ==========
-     *
-     * In a recent (2025) update, MRM updated their search interface. As such, there is no longer
-     * pages listing every tags, every author, etc. (except for Langs and Genres). The search page
-     * display the top 25 results for each filter category. Since these lists aren't exhaustive, we
-     * call them "Popular"
-     *
-     * TODO : MRM have a meta sitemap (https://myreadingmanga.info/sitemap_index.xml) that links to
-     * tag/genre/pairing/etc xml sitemaps. Filters could be populated from those instead of HTML pages
-     */
+    // ========== FILTERS ==========
 
-    // --- DYNAMIC GENRE FILTER FROM SITEMAP ---
     private var genresSitemap: List<MrmFilter>? = null
 
-    private fun getGenresFromSitemap(): List<MrmFilter> {
+    private fun getGenresFromXmlSitemap(): List<MrmFilter> {
         if (genresSitemap != null) return genresSitemap!!
-
-        val genreSitemapUrl = "$baseUrl/genre-sitemap/"
+        val genreSitemapUrl = "$baseUrl/genre-sitemap.xml"
         val response = client.newCall(GET(genreSitemapUrl, headers)).execute()
-        val html = response.body.string()
-        val doc = Jsoup.parse(html)
-        val genreElements = doc.select("#sitemap tbody tr td a[href*=/genre/]")
-        val result = genreElements.map { a ->
-            val url = a.attr("href")
+        val xml = response.body.string()
+        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
+        val urls = doc.select("url > loc")
+        val result = urls.map { locElem ->
+            val url = locElem.text()
             val slug = url.trimEnd('/').split("/").last()
             val name = slug.replace("-", " ").replaceFirstChar { it.uppercase() }
             MrmFilter(name, slug)

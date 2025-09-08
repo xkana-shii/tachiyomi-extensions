@@ -434,7 +434,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(mainPage)
         }
-        val parent = document?.select(".widget-title")?.first { it.text() == filterTitle }?.parent()
+        val parent = document?.select(".widget-title")?.firstOrNull { it.text() == filterTitle }?.parent()
         return parent?.select(".tag-cloud-link")
             ?.map { MrmFilter(it.text(), it.attr("href").split("/").reversed()[1]) }
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
@@ -449,7 +449,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(searchPage)
         }
-        val parent = document?.select(".ep-filter-title")?.first { it.text() == filterTitle }?.parent()
+        val parent = document?.select(".ep-filter-title")?.firstOrNull { it.text() == filterTitle }?.parent()
         return parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
     }

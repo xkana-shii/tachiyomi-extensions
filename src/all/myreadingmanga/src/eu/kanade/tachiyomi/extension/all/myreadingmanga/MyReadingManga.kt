@@ -8,6 +8,7 @@ import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
+import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.await
@@ -122,11 +123,20 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             summary = "Enter your password"
             setOnPreferenceChangeListener { _, _ ->
                 Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+            }
+        val siteFiltersPref = SwitchPreferenceCompat(screen.context).apply {
+            key = USE_HTML_FILTERS_PREF
+            title = "Use site filters (main/search page)"
+            summary = "Enable this to use site filters from main/search page instead of XML sitemaps"
+            setDefaultValue(true)
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(application, "KMR - Restart the app to apply changes", Toast.LENGTH_LONG).show()
                 true
             }
         }
         screen.addPreference(usernamePref)
         screen.addPreference(passwordPref)
+        screen.addPreference(siteFiltersPref)
     }
 
     /*
@@ -458,21 +468,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * ========== Filter toggles ==========
      */
 
-    // Persistent non-resettable toggle for site filters
-    private class UseHtmlFiltersToggle(initialState: Boolean) : Filter.CheckBox("Use site filters (main/search page)", initialState)
-
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
-        val useHtmlFiltersPrefKey = "USE_HTML_FILTERS"
+        val useHtmlFiltersPrefKey = USE_HTML_FILTERS_PREF
         val useHtmlFiltersDefault = false
         val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
-        val htmlFiltersToggle = UseHtmlFiltersToggle(useHtmlFilters)
         val filters = mutableListOf<Filter<*>>()
         filters += EnforceLanguageFilter(siteLang)
-        filters += htmlFiltersToggle
 
         // Use the persistent value from SharedPreferences for logic
-        val useHtmlFiltersForLogic = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
+        val useHtmlFiltersForLogic = useHtmlFilters
 
         val genres = try {
             if (useHtmlFiltersForLogic) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
@@ -480,7 +485,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             getFiltersFromMainPage("Genres")
         }
         val categories = try {
-            if (useHtmlFiltersForLogic) getFiltersFromMainPage("Category") else getCategoriesFromXmlSitemap()
+            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Category") else getCategoriesFromXmlSitemap()
         } catch (_: Exception) {
             getFiltersFromMainPage("Category")
         }
@@ -552,6 +557,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     companion object {
         private const val USERNAME_PREF = "MYREADINGMANGA_USERNAME"
         private const val PASSWORD_PREF = "MYREADINGMANGA_PASSWORD"
+        private const val USE_HTML_FILTERS_PREF = "MYREADINGMANGA_USE_HTML_FILTERS"
     }
 
     private fun randomString(length: Int): String {

@@ -188,6 +188,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 filter.addToUri(uri)
             }
         }
+
+        filters.filterIsInstance<SortFilter>().firstOrNull()?.let { sortFilter ->
+            val checked = sortFilter.state.filter { it.state }.firstOrNull()
+            if (checked != null && checked.value.isNotEmpty()) {
+                uri.appendQueryParameter("ep_sort", checked.value)
+            }
+        }
+
         return GET(uri.toString(), headers)
     }
 

@@ -124,13 +124,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             setOnPreferenceChangeListener { _, _ ->
                 Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
             }
+        }
         val siteFiltersPref = SwitchPreferenceCompat(screen.context).apply {
             key = USE_HTML_FILTERS_PREF
             title = "Use site filters (main/search page)"
             summary = "Enable this to use site filters from main/search page instead of XML sitemaps"
             setDefaultValue(true)
             setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "KMR - Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
                 true
             }
         }

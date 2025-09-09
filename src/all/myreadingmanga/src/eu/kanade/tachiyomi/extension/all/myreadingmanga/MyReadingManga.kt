@@ -341,6 +341,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private var artistsSitemap: List<MrmFilter>? = null
     private var statusSitemap: List<MrmFilter>? = null
 
+    // Helper function to fetch and parse sitemap for a specific type (genre, category, etc.)
+    private fun getSitemapFilters(type: String): List<MrmFilter> {
+        return try {
+            val urls = getSitemapUrls(type)
+            urls.flatMap { url ->
+                try { fetchSitemap(url) } catch (_: Exception) { emptyList() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    // Gets all sitemap URLs for a given type (genre, category, etc.)
     private fun getSitemapUrls(type: String): List<String> {
         val indexUrl = "$baseUrl/sitemap_index.xml"
         val response = client.newCall(GET(indexUrl, headers)).execute()
@@ -351,61 +364,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             .filter { it.contains("$type-sitemap") }
     }
 
-    private fun getGenresFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("genre")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
+    private fun getGenresFromXmlSitemap(): List<MrmFilter> = getSitemapFilters("genre")
+    private fun getCategoriesFromXmlSitemap(): List<MrmFilter> = getSitemapFilters("category")
+    private fun getPairingsFromXmlSitemap(): List<MrmFilter> = getSitemapFilters("pairing")
+    private fun getPostTagsFromXmlSitemap(): List<MrmFilter> = getSitemapFilters("post_tag")
+    private fun getArtistsFromXmlSitemaps(): List<MrmFilter> = getSitemapFilters("artist")
+    private fun getStatusFromXmlSitemap(): List<MrmFilter> = getSitemapFilters("status")
 
-    private fun getCategoriesFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("category")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getPairingsFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("pairing")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getPostTagsFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("post_tag")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getArtistsFromXmlSitemaps(): List<MrmFilter> {
-        val urls = getSitemapUrls("artist")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getStatusFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("status")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    // Helper for all the XML sitemaps
+    // Helper for parsing a single XML sitemap file into MrmFilter list
     private fun fetchSitemap(sitemapUrl: String): List<MrmFilter> {
         val response = client.newCall(GET(sitemapUrl, headers)).execute()
         val xml = response.body.string()
@@ -470,6 +436,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      * ========== Filter toggles ==========
      */
 
+    // Helper to decide between HTML filter or XML sitemap, with fallback
+    private fun getFilterWithFallback(
+        useHtmlFilters: Boolean,
+        htmlFilterProvider: () -> List<MrmFilter>,
+        xmlSitemapProvider: () -> List<MrmFilter>
+    ): List<MrmFilter> {
+        return try {
+            if (useHtmlFilters) htmlFilterProvider() else xmlSitemapProvider()
+        } catch (_: Exception) {
+            htmlFilterProvider()
+        }
+    }
+
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
         val useHtmlFiltersPrefKey = USE_HTML_FILTERS_PREF
@@ -478,39 +457,37 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val filters = mutableListOf<Filter<*>>()
         filters += EnforceLanguageFilter(siteLang)
 
-        // Use the persistent value from SharedPreferences for logic
-        val useHtmlFiltersForLogic = useHtmlFilters
+        val genres = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromMainPage("Genres") },
+            { getGenresFromXmlSitemap() }
+        )
+        val categories = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromSearchPage("Category") },
+            { getCategoriesFromXmlSitemap() }
+        )
+        val pairings = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromSearchPage("Pairing") },
+            { getPairingsFromXmlSitemap() }
+        )
+        val postTags = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromSearchPage("Tag") },
+            { getPostTagsFromXmlSitemap() }
+        )
+        val artists = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromSearchPage("Circle/ artist") },
+            { getArtistsFromXmlSitemaps() }
+        )
+        val statuses = getFilterWithFallback(
+            useHtmlFilters,
+            { getFiltersFromSearchPage("Status") },
+            { getStatusFromXmlSitemap() }
+        )
 
-        val genres = try {
-            if (useHtmlFiltersForLogic) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromMainPage("Genres")
-        }
-        val categories = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Category") else getCategoriesFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromMainPage("Category")
-        }
-        val pairings = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Pairing") else getPairingsFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Pairing")
-        }
-        val postTags = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Tag") else getPostTagsFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Tag")
-        }
-        val artists = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Circle/ artist") else getArtistsFromXmlSitemaps()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Circle/ artist")
-        }
-        val statuses = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Status") else getStatusFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Status")
-        }
         filters += GenreFilter(genres)
         filters += CatFilter(categories)
         filters += TagFilter(postTags)

@@ -238,10 +238,22 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val url = thumbnailUrl.substringBeforeLast("-") + "." + thumbnailUrl.substringAfterLast(".")
         return if (URLUtil.isValidUrl(url)) url else null
     }
+    private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
+    private fun cleanTitle(title: String): String {
+        var cleanedTitle = title.replace(titleRegex, " ").trim()
 
-    // cleans up the name removing author and language from the title
-    private val titleRegex = Regex("""\[[^]]*]""")
-    private fun cleanTitle(title: String) = title.replace(titleRegex, "").substringBeforeLast("(").trim()
+        if (cleanedTitle.endsWith(")")) {
+            val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
+            if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
+
+                cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
+            }
+        }
+
+        cleanedTitle = cleanedTitle.replace(Regex("\\s+"), " ")
+
+        return cleanedTitle
+    }
 
     // Manga Details
     override suspend fun getMangaDetails(manga: SManga): SManga {

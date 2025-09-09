@@ -187,12 +187,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             } else if (filter is UriFilter) {
                 filter.addToUri(uri)
             }
-        }
-
-        filters.filterIsInstance<SortFilter>().firstOrNull()?.let { sortFilter ->
-            val checked = sortFilter.state.filter { it.state }.firstOrNull()
-            if (checked != null && checked.value.isNotEmpty()) {
-                uri.appendQueryParameter("ep_sort", checked.value)
+            if (filter is SearchSortTypeList) {
+                uri.appendQueryParameter("ep_sort", listOf("", "date", "date_asc", "rand")[filter.state])
             }
         }
 
@@ -488,7 +484,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
         val filters = mutableListOf<Filter<*>>()
         filters += EnforceLanguageFilter(siteLang)
-        filters += SortFilter() // <-- sorting filter
+        filters += SearchSortTypeList() // <-- sorting filter
 
         // Use the persistent value from SharedPreferences for logic
         val useHtmlFiltersForLogic = useHtmlFilters
@@ -547,18 +543,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Artist", "ep_filter_artist", POPART)
     private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Pairing", "ep_filter_pairing", PAIR)
     private class StatusFilter(STATUS: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", STATUS)
-
-    // --- SORT FILTER ---
-    private class SortFilter : UriSelectFilter(
-        "Sort by",
-        "ep_sort",
-        listOf(
-            MrmFilter("Relevance", ""),
-            MrmFilter("Newest", "date"),
-            MrmFilter("Oldest", "date_asc"),
-            MrmFilter("Random", "rand"),
-        ),
-    )
+    private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Relevance", "Newest", "Oldest", "Random"))
 
     private open class UriSelectFilter(
         displayName: String,

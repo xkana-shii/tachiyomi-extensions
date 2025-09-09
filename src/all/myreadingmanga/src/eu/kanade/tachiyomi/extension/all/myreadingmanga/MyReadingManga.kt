@@ -123,6 +123,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             summary = "Enter your password"
             setOnPreferenceChangeListener { _, _ ->
                 Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
             }
         }
         val siteFiltersPref = SwitchPreferenceCompat(screen.context).apply {

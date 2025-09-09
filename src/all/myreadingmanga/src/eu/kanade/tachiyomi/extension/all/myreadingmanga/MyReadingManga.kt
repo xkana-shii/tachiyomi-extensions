@@ -277,8 +277,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 thumbnail_url = getThumbnail(
                     getImage(
                         client.newCall(GET("$baseUrl/search/?search=${document.location()}", headers))
-                            .execute().asJsoup().select("div.wdm_results div.p_content img").first()!!,
-                    ),
+                            .execute().asJsoup().select("div.wdm_results div.p_content img").first()!!
+                    )
                 )
             }
         }

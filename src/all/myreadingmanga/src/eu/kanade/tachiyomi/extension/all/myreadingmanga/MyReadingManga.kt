@@ -245,7 +245,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         if (cleanedTitle.endsWith(")")) {
             val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
             if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
-
                 cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
             }
         }
@@ -290,7 +289,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                     getImage(
                         client.newCall(GET("$baseUrl/search/?search=${document.location()}", headers))
                             .execute().asJsoup().select("div.wdm_results div.p_content img").first()!!,
-                    )
+                    ),
                 )
             }
         }

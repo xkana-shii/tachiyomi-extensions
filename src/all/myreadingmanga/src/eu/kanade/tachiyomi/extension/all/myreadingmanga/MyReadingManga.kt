@@ -333,14 +333,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // ========== FILTERS ==========
 
-    // ========== DYNAMIC XML SITEMAP FILTERS ==========
-    private var genresSitemap: List<MrmFilter>? = null
-    private var categoriesSitemap: List<MrmFilter>? = null
-    private var pairingsSitemap: List<MrmFilter>? = null
-    private var postTagSitemap: List<MrmFilter>? = null
-    private var artistsSitemap: List<MrmFilter>? = null
-    private var statusSitemap: List<MrmFilter>? = null
-
     private fun getSitemapUrls(type: String): List<String> {
         val indexUrl = "$baseUrl/sitemap_index.xml"
         val response = client.newCall(GET(indexUrl, headers)).execute()

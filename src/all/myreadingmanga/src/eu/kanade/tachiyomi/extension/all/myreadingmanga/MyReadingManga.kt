@@ -8,7 +8,6 @@ import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
-import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.await
@@ -29,7 +28,6 @@ import okhttp3.Response
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import org.jsoup.parser.Parser
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
@@ -44,7 +42,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     final override val baseUrl = "https://myreadingmanga.info"
     override fun headersBuilder(): Headers.Builder =
         super.headersBuilder()
-            .set("User-Agent", "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36")
+            .set("User-Agent", "Mozilla/5.0 (Linux; Android 13; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.7258.159 Mobile Safari/537.36")
             .add("X-Requested-With", randomString((1..20).random()))
 
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
@@ -126,26 +124,15 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 true
             }
         }
-        val siteFiltersPref = SwitchPreferenceCompat(screen.context).apply {
-            key = USE_HTML_FILTERS_PREF
-            title = "Use site filters (main/search page)"
-            summary = "Enable this to use site filters from main/search page instead of XML sitemaps"
-            setDefaultValue(true)
-            setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
-                true
-            }
-        }
         screen.addPreference(usernamePref)
         screen.addPreference(passwordPref)
-        screen.addPreference(siteFiltersPref)
     }
 
     /*
      *  ========== Popular - Random ==========
      */
     override fun popularMangaRequest(page: Int): Request {
-        return GET("$baseUrl/popular/", headers)
+        return GET("$baseUrl/popular/", headers) // Random Manga as returned by search
     }
 
     override fun popularMangaNextPageSelector() = null
@@ -161,7 +148,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
      */
     @SuppressLint("DefaultLocale")
     override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers)
+        return GET("$baseUrl/lang/${latestLang.lowercase()}" + if (page > 1) "/page/$page/" else "", headers) // Home Page - Latest Manga
     }
 
     override fun latestUpdatesNextPageSelector() = "li.pagination-next"
@@ -187,11 +174,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             } else if (filter is UriFilter) {
                 filter.addToUri(uri)
             }
-            if (filter is SearchSortTypeList) {
-                uri.appendQueryParameter("ep_sort", listOf("", "date", "date_asc", "rand")[filter.state])
-            }
         }
-
         return GET(uri.toString(), headers)
     }
 
@@ -346,86 +329,17 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
-    // ========== FILTERS ==========
-
-    private fun getSitemapUrls(type: String): List<String> {
-        val indexUrl = "$baseUrl/sitemap_index.xml"
-        val response = client.newCall(GET(indexUrl, headers)).execute()
-        val xml = response.body.string()
-        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
-        return doc.select("sitemap > loc")
-            .map { it.text() }
-            .filter { it.contains("$type-sitemap") }
-    }
-
-    private fun getGenresFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("genre")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getCategoriesFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("category")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getPairingsFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("pairing")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getPostTagsFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("post_tag")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getArtistsFromXmlSitemaps(): List<MrmFilter> {
-        val urls = getSitemapUrls("artist")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    private fun getStatusFromXmlSitemap(): List<MrmFilter> {
-        val urls = getSitemapUrls("status")
-        val all = mutableListOf<MrmFilter>()
-        for (url in urls) {
-            try { all += fetchSitemap(url) } catch (_: Exception) {}
-        }
-        return all
-    }
-
-    // Helper for all the XML sitemaps
-    private fun fetchSitemap(sitemapUrl: String): List<MrmFilter> {
-        val response = client.newCall(GET(sitemapUrl, headers)).execute()
-        val xml = response.body.string()
-        val doc = Jsoup.parse(xml, "", Parser.xmlParser())
-        val urls = doc.select("url > loc")
-        return urls.map { locElem ->
-            val url = locElem.text()
-            val slug = url.trimEnd('/').split("/").last()
-            val name = slug.replace("-", " ").replaceFirstChar { it.uppercase() }
-            MrmFilter(name, slug)
-        }
-    }
-
+    /*
+     * ========== Parse filters from pages ==========
+     *
+     * In a recent (2025) update, MRM updated their search interface. As such, there is no longer
+     * pages listing every tags, every author, etc. (except for Langs and Genres). The search page
+     * display the top 25 results for each filter category. Since these lists aren't exhaustive, we
+     * call them "Popular"
+     *
+     * TODO : MRM have a meta sitemap (https://myreadingmanga.info/sitemap_index.xml) that links to
+     * tag/genre/pairing/etc xml sitemaps. Filters could be populated from those instead of HTML pages
+     */
     private var filtersCached = false
     private var mainPage = ""
     private var searchPage = ""
@@ -453,14 +367,14 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(mainPage)
         }
-        val parent = document?.select(".widget-title")?.firstOrNull { it.text() == filterTitle }?.parent()
+        val parent = document?.select(".widget-title")?.first { it.text() == filterTitle }?.parent()
         return parent?.select(".tag-cloud-link")
             ?.map { MrmFilter(it.text(), it.attr("href").split("/").reversed()[1]) }
             ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
     }
 
     // Parses search page for filters
-    private fun getFiltersFromSearchPage(filterTitle: String): List<MrmFilter> {
+    private fun getFiltersFromSearchPage(filterTitle: String, isSelectDropdown: Boolean = false): List<MrmFilter> {
         val document = if (searchPage == "") {
             filtersCached = false
             null
@@ -468,64 +382,29 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             filtersCached = true
             Jsoup.parse(searchPage)
         }
-        val parent = document?.select(".ep-filter-title")?.firstOrNull { it.text() == filterTitle }?.parent()
-        return parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
-            ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
-    }
+        val parent = document?.select(".ep-filter-title")?.first { it.text() == filterTitle }?.parent()
 
-    /*
-     * ========== Filter toggles ==========
-     */
+        val filters: List<MrmFilter>? = if (isSelectDropdown) {
+            parent?.select("option")?.map { MrmFilter(it.text(), it.attr("value")) }
+        } else {
+            parent?.select(".term")?.map { MrmFilter(it.text(), it.attr("data-term-slug")) }
+        }
+
+        return filters ?: listOf(MrmFilter("Press 'Reset' to load filters", ""))
+    }
 
     // Generates the filter lists for app
     override fun getFilterList(): FilterList {
-        val useHtmlFiltersPrefKey = USE_HTML_FILTERS_PREF
-        val useHtmlFiltersDefault = false
-        val useHtmlFilters = preferences.getBoolean(useHtmlFiltersPrefKey, useHtmlFiltersDefault)
-        val filters = mutableListOf<Filter<*>>()
-        filters += EnforceLanguageFilter(siteLang)
-        filters += SearchSortTypeList() // <-- sorting filter
-
-        // Use the persistent value from SharedPreferences for logic
-        val useHtmlFiltersForLogic = useHtmlFilters
-
-        val genres = try {
-            if (useHtmlFiltersForLogic) getFiltersFromMainPage("Genres") else getGenresFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromMainPage("Genres")
-        }
-        val categories = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Category") else getCategoriesFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromMainPage("Category")
-        }
-        val pairings = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Pairing") else getPairingsFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Pairing")
-        }
-        val postTags = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Tag") else getPostTagsFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Tag")
-        }
-        val artists = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Circle/ artist") else getArtistsFromXmlSitemaps()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Circle/ artist")
-        }
-        val statuses = try {
-            if (useHtmlFiltersForLogic) getFiltersFromSearchPage("Status") else getStatusFromXmlSitemap()
-        } catch (_: Exception) {
-            getFiltersFromSearchPage("Status")
-        }
-        filters += GenreFilter(genres)
-        filters += CatFilter(categories)
-        filters += TagFilter(postTags)
-        filters += ArtistFilter(artists)
-        filters += PairingFilter(pairings)
-        filters += StatusFilter(statuses)
-        return FilterList(filters)
+        return FilterList(
+            EnforceLanguageFilter(siteLang),
+            SearchSortTypeList(getFiltersFromSearchPage("Sort by", true)),
+            GenreFilter(getFiltersFromMainPage("Genres")),
+            CatFilter(getFiltersFromSearchPage("Category")),
+            TagFilter(getFiltersFromSearchPage("Tag")),
+            ArtistFilter(getFiltersFromSearchPage("Circle/ artist")),
+            PairingFilter(getFiltersFromSearchPage("Pairing")),
+            StatusFilter(getFiltersFromSearchPage("Status")),
+        )
     }
 
     private class EnforceLanguageFilter(val siteLang: String) : Filter.CheckBox("Enforce language", true), UriFilter {
@@ -534,17 +413,15 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
-    // Sitemap filters are resettable by default
-    private class MrmFilter(name: String, val value: String) : Filter.CheckBox(name, false)
-
+    private class SearchSortTypeList(SORT: List<MrmFilter>) : UriSelectOneFilter("Sort by", "ep_sort", SORT)
     private class GenreFilter(GENRES: List<MrmFilter>) : UriSelectFilter("Genre", "ep_filter_genre", GENRES)
-    private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Category", "ep_filter_category", CATID)
-    private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Tag", "ep_filter_post_tag", POPTAG)
-    private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Artist", "ep_filter_artist", POPART)
-    private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Pairing", "ep_filter_pairing", PAIR)
+    private class CatFilter(CATID: List<MrmFilter>) : UriSelectFilter("Popular Categories", "ep_filter_category", CATID)
+    private class TagFilter(POPTAG: List<MrmFilter>) : UriSelectFilter("Popular Tags", "ep_filter_post_tag", POPTAG)
+    private class ArtistFilter(POPART: List<MrmFilter>) : UriSelectFilter("Popular Artists", "ep_filter_artist", POPART)
+    private class PairingFilter(PAIR: List<MrmFilter>) : UriSelectFilter("Popular Pairings", "ep_filter_pairing", PAIR)
     private class StatusFilter(STATUS: List<MrmFilter>) : UriSelectFilter("Status", "ep_filter_status", STATUS)
-    private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Relevance", "Newest", "Oldest", "Random"))
 
+    private class MrmFilter(name: String, val value: String) : Filter.CheckBox(name)
     private open class UriSelectFilter(
         displayName: String,
         val uriParam: String,
@@ -558,6 +435,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         }
     }
 
+    private open class UriSelectOneFilter(
+        displayName: String,
+        val uriParam: String,
+        val vals: List<MrmFilter>,
+        defaultValue: Int = 0,
+    ) : Filter.Select<String>(displayName, vals.map { it.name }.toTypedArray(), defaultValue), UriFilter {
+        override fun addToUri(uri: Uri.Builder) {
+            if (state != 0) {
+                uri.appendQueryParameter(uriParam, vals[state].value)
+            }
+        }
+    }
+
     /**
      * Represents a filter that is able to modify a URI.
      */
@@ -568,7 +458,6 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     companion object {
         private const val USERNAME_PREF = "MYREADINGMANGA_USERNAME"
         private const val PASSWORD_PREF = "MYREADINGMANGA_PASSWORD"
-        private const val USE_HTML_FILTERS_PREF = "MYREADINGMANGA_USE_HTML_FILTERS"
     }
 
     private fun randomString(length: Int): String {

@@ -299,8 +299,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 chapters.add(createChapter(i.toString(), document.baseUri(), date, "Ch. $i"))
             }
         }
-        chapters.reverse()
-        return chapters
+        return chapters.reversed()
     }
 
     private fun parseDate(date: String): Long {

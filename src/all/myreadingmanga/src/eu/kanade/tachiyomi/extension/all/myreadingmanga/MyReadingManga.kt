@@ -219,18 +219,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     }
     private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
     private fun cleanTitle(title: String): String {
-        var cleanedTitle = title.replace(titleRegex, " ").trim()
-
-        if (cleanedTitle.endsWith(")")) {
-            val lastOpenParenIndex = cleanedTitle.lastIndexOf('(')
-            if (lastOpenParenIndex != -1 && cleanedTitle.indexOf(')', lastOpenParenIndex) == cleanedTitle.length - 1) {
-                cleanedTitle = cleanedTitle.substring(0, lastOpenParenIndex).trimEnd()
-            }
+        var cleanedTitle = title
+        cleanedTitle = cleanedTitle.replace(titleRegex, " ").trim()
+        if (cleanedTitle.endsWith(")") && cleanedTitle.lastIndexOf('(') != -1) {
+            cleanedTitle = cleanedTitle.substringBeforeLast("(").trimEnd()
         }
-
-        cleanedTitle = cleanedTitle.replace(Regex("\\s+"), " ")
-
-        return cleanedTitle
+        return cleanedTitle.replace(Regex("\\s+"), " ").trim()
     }
 
     // Manga Details

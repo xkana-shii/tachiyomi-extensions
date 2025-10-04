@@ -133,3 +133,22 @@ class PagesCountDto(
         )
     }
 }
+
+@Serializable
+data class KaganeSsrMetadata(
+    val genres: Map<String, KaganeGenreMeta> = emptyMap(),
+    val sources: List<String> = emptyList(),
+    val tags: Map<String, KaganeTagMeta> = emptyMap()
+)
+
+@Serializable
+data class KaganeGenreMeta(
+    @SerialName("item_count") val itemCount: Int,
+    val values: List<String>
+)
+
+@Serializable
+data class KaganeTagMeta(
+    @SerialName("item_count") val itemCount: Int,
+    val values: List<String>
+)

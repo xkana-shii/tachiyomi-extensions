@@ -27,6 +27,9 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Cookie
@@ -144,16 +147,57 @@ class Kagane : HttpSource(), ConfigurableSource {
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(0)))
+        searchMangaRequest(page, "", FilterList(SortFilter(0, true)))
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val body = buildJsonObject { }
-            .toJsonString()
-            .toRequestBody("application/json".toMediaType())
+        var sources = emptyList<String>()
+        var genres = emptyList<String>()
+        var tags = emptyList<String>()
+        var sortField: String? = null
+        var sortAsc = true
+
+        filters.forEach { filter ->
+            when (filter) {
+                is SourceFilter -> sources = filter.selected()
+                is GenreFilter -> genres = filter.selected()
+                is TagFilter -> tags = filter.selected()
+                is SortFilter -> {
+                    filter.state?.let { (index, ascending) ->
+                        sortAsc = ascending
+                        sortField = when (index) {
+                            0 -> null // Relevance: do not add sort parameter
+                            1 -> if (sortAsc) "updated_at" else "updated_at,desc"
+                            2 -> if (sortAsc) "series_name" else "series_name,desc"
+                            3 -> if (sortAsc) "books_count" else "books_count,desc"
+                            4 -> if (sortAsc) "created_at" else "created_at,desc"
+                            else -> null
+                        }
+                    }
+                }
+                is Filter.CheckBox, is Filter.Group<*>, is Filter.Header, is Filter.Select<*>, is Filter.Separator, is Filter.Text -> {}
+                else -> {}
+            }
+        }
+
+        val body = buildJsonObject {
+            put("sources", buildJsonArray { sources.forEach { add(JsonPrimitive(it)) } })
+            if (tags.isNotEmpty()) {
+                put("inclusive_tags", buildJsonObject {
+                    put("values", buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } })
+                    put("match_all", true)
+                })
+            }
+            if (genres.isNotEmpty()) {
+                put("inclusive_genres", buildJsonObject {
+                    put("values", buildJsonArray { genres.forEach { add(JsonPrimitive(it)) } })
+                    put("match_all", true)
+                })
+            }
+        }.toJsonString().toRequestBody("application/json".toMediaType())
 
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
@@ -162,14 +206,8 @@ class Kagane : HttpSource(), ConfigurableSource {
             if (query.isNotBlank()) {
                 addQueryParameter("name", query)
             }
-            filters.forEach { filter ->
-                when (filter) {
-                    is SortFilter -> {
-                        addQueryParameter("sort", filter.toUriPart())
-                    }
-
-                    else -> {}
-                }
+            if (sortField != null) {
+                addQueryParameter("sort", sortField)
             }
         }
 
@@ -419,32 +457,62 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // ============================= Filters ==============================
+    
+    private fun fetchKaganeFiltersJson(): KaganeSsrMetadata? {
+        val searchUrl = "$baseUrl/search"
+        val req = GET(searchUrl, headers)
+        val resp = client.newCall(req).execute()
+        val body = resp.body?.string() ?: return null
 
-    override fun getFilterList() = FilterList(
-        SortFilter(),
-    )
+        // Try to extract the SSR metadata JSON
+        val regex = Regex("\"ssrMetadata\":(\\{.*?\\})[,}]")
+        val match = regex.find(body)
+        val metadataJson = match?.groups?.get(1)?.value ?: return null
 
-    class SortFilter(state: Int = 0) : UriPartFilter(
+        return try {
+            Json { ignoreUnknownKeys = true }
+                .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    class SourceFilter(sources: List<String>) : Filter.Group<String>("Source", sources) {
+        fun selected(): List<String> = state.filter { it.isNotBlank() }
+    }
+    class GenreFilter(genres: List<String>) : Filter.Group<String>("Genres", genres) {
+        fun selected(): List<String> = state.filter { it.isNotBlank() }
+    }
+    class TagFilter(tags: List<String>) : Filter.Group<String>("Tags", tags) {
+        fun selected(): List<String> = state.filter { it.isNotBlank() }
+    }
+
+    // Filter.Sort with ascending/descending toggle (click twice to change direction)
+    class SortFilter(
+        state: Int = 0,
+        ascending: Boolean = true
+    ) : Filter.Sort(
         "Sort By",
         arrayOf(
-            Pair("Relevance", "relevance"),
-            Pair("Latest", "updated_at"),
-            Pair("Latest Descending", "updated_at,desc"),
-            Pair("By Name", "series_name"),
-            Pair("By Name Descending", "series_name,desc"),
-            Pair("Books count", "books_count"),
-            Pair("Books count Descending", "books_count,desc"),
-            Pair("Created at", "created_at"),
-            Pair("Created at Descending", "created_at,desc"),
+            "Relevance",        // index 0 (no sort param)
+            "Latest",           // index 1
+            "By Name",          // index 2
+            "Books count",      // index 3
+            "Created at"        // index 4
         ),
-        state,
+        Selection(state, ascending)
     )
 
-    open class UriPartFilter(
-        displayName: String,
-        private val vals: Array<Pair<String, String>>,
-        state: Int = 0,
-    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
-        fun toUriPart() = vals[state].second
+    override fun getFilterList(): FilterList {
+        val meta = fetchKaganeFiltersJson()
+        val sourceList = meta?.sources ?: emptyList()
+        val genreList = meta?.genres?.keys?.toList() ?: emptyList()
+        val tagList = meta?.tags?.keys?.toList() ?: emptyList()
+        return FilterList(
+            SortFilter(),
+            SourceFilter(sourceList),
+            GenreFilter(genreList),
+            TagFilter(tagList)
+        )
     }
 }

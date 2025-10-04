@@ -118,7 +118,11 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         var response = chain.proceed(
             request.newBuilder()
-                .url(url.newBuilder().setQueryParameter("token", accessToken).build())
+                .url(
+                    url.newBuilder()
+                        .setQueryParameter("token", accessToken)
+                        .build(),
+                )
                 .build(),
         )
         if (response.code == 401) {
@@ -131,7 +135,11 @@ class Kagane : HttpSource(), ConfigurableSource {
             accessToken = challenge.accessToken
             response = chain.proceed(
                 request.newBuilder()
-                    .url(url.newBuilder().setQueryParameter("token", accessToken).build())
+                    .url(
+                        url.newBuilder()
+                            .setQueryParameter("token", accessToken)
+                            .build(),
+                    )
                     .build(),
             )
         }
@@ -147,7 +155,16 @@ class Kagane : HttpSource(), ConfigurableSource {
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(0, true)))
+        searchMangaRequest(
+            page,
+            "",
+            FilterList(
+                SortFilter(
+                    0,
+                    true,
+                ),
+            ),
+        )
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
@@ -178,22 +195,33 @@ class Kagane : HttpSource(), ConfigurableSource {
                         }
                     }
                 }
-                is Filter.CheckBox, is Filter.Group<*>, is Filter.Header, is Filter.Select<*>, is Filter.Separator, is Filter.Text -> {}
+                is Filter.CheckBox,
+                is Filter.Group<*>,
+                is Filter.Header,
+                is Filter.Select<*>,
+                is Filter.Separator,
+                is Filter.Text -> {}
                 else -> {}
             }
         }
 
         val body = buildJsonObject {
-            put("sources", buildJsonArray { sources.forEach { add(JsonPrimitive(it)) } })
+            put("sources", buildJsonArray {
+                sources.forEach { add(JsonPrimitive(it)) }
+            })
             if (tags.isNotEmpty()) {
                 put("inclusive_tags", buildJsonObject {
-                    put("values", buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } })
+                    put("values", buildJsonArray {
+                        tags.forEach { add(JsonPrimitive(it)) }
+                    })
                     put("match_all", true)
                 })
             }
             if (genres.isNotEmpty()) {
                 put("inclusive_genres", buildJsonObject {
-                    put("values", buildJsonArray { genres.forEach { add(JsonPrimitive(it)) } })
+                    put("values", buildJsonArray {
+                        genres.forEach { add(JsonPrimitive(it)) }
+                    })
                     put("match_all", true)
                 })
             }
@@ -490,7 +518,7 @@ class Kagane : HttpSource(), ConfigurableSource {
     // Filter.Sort with ascending/descending toggle (click twice to change direction)
     class SortFilter(
         state: Int = 0,
-        ascending: Boolean = true
+        ascending: Boolean = true,
     ) : Filter.Sort(
         "Sort By",
         arrayOf(
@@ -498,9 +526,9 @@ class Kagane : HttpSource(), ConfigurableSource {
             "Latest",           // index 1
             "By Name",          // index 2
             "Books count",      // index 3
-            "Created at"        // index 4
+            "Created at",       // index 4
         ),
-        Selection(state, ascending)
+        Selection(state, ascending),
     )
 
     override fun getFilterList(): FilterList {
@@ -512,7 +540,7 @@ class Kagane : HttpSource(), ConfigurableSource {
             SortFilter(),
             SourceFilter(sourceList),
             GenreFilter(genreList),
-            TagFilter(tagList)
+            TagFilter(tagList),
         )
     }
 }

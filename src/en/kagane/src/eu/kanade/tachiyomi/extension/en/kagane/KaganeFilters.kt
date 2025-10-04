@@ -33,7 +33,6 @@ fun getSortFilter() = listOf(
 )
 
 fun getSourceFilter() = listOf(
-    CheckboxFilterOption("All", ""),
     CheckboxFilterOption("Comikey", "Comikey"),
     CheckboxFilterOption("Day Comics", "Day Comics"),
     CheckboxFilterOption("INKR Comics", "INKR Comics"),
@@ -47,7 +46,6 @@ fun getSourceFilter() = listOf(
 )
 
 fun getGenreFilter() = listOf(
-    TriStateFilterOption("", "All"),
     TriStateFilterOption("action", "Action"),
     TriStateFilterOption("adult", "Adult"),
     TriStateFilterOption("adventure", "Adventure"),
@@ -186,6 +184,5 @@ fun getGenreFilter() = listOf(
 )
 
 fun getTagFilter() = listOf(
-    TriStateFilterOption("", "All"),
     TriStateFilterOption("action", "Action"),
 )

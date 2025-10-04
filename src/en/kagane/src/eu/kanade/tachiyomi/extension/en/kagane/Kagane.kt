@@ -16,7 +16,6 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
-import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -41,7 +40,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.IOException
 import rx.Observable
-import rx.schedulers.Schedulers
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.nio.ByteBuffer
@@ -428,14 +426,13 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // ============================= Filters ==============================
-    // Robust genre/tags/source fetching (based on QiScans/EZmanga pattern)
-    // Only genre and tag are tristate; source and sort are single-select.
+
     override fun getFilterList(): FilterList {
         return FilterList(
             SortFilter(getSortFilter()),
             GenreGroupFilter(getGenreFilter()),
             TagGroupFilter(getTagFilter()),
-            SourceFilter(getSourceFilter())
+            SourceFilter(getSourceFilter()),
         )
     }
 }

@@ -427,6 +427,7 @@ class Kagane : HttpSource(), ConfigurableSource {
     class SortFilter(state: Int = 0) : UriPartFilter(
         "Sort By",
         arrayOf(
+            Pair("Relevance", "relevance"),
             Pair("Latest", "updated_at"),
             Pair("Latest Descending", "updated_at,desc"),
             Pair("By Name", "series_name"),

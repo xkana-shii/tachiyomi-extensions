@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
-import android.util.Base64
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -27,7 +26,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -132,61 +130,86 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(0, true)))
+        searchMangaRequest(page, "", FilterList(SortFilter()))
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        var sources = emptyList<String>()
-        var genres = emptyList<String>()
-        var tags = emptyList<String>()
-        var sortField: String? = null
-        var sortAsc: Boolean
+        // ----------- FILTER EXTRACTION LOGIC -----------
+        var source: String? = null
+        var sort: String? = null
+        val includedGenres = mutableListOf<String>()
+        val excludedGenres = mutableListOf<String>()
+        val includedTags = mutableListOf<String>()
+        val excludedTags = mutableListOf<String>()
 
         filters.forEach { filter ->
             when (filter) {
-                is SourceFilter -> sources = filter.selected()
-                is GenreFilter -> genres = filter.selected()
-                is TagFilter -> tags = filter.selected()
+                is SourceFilter -> {
+                    // Single-select: use selected value
+                    source = filter.values[filter.state]
+                }
                 is SortFilter -> {
-                    filter.state?.let { (index, ascending) ->
-                        sortAsc = ascending
-                        sortField = when (index) {
-                            0 -> null // Relevance: do not add sort parameter
-                            1 -> if (sortAsc) "updated_at" else "updated_at,desc"
-                            2 -> if (sortAsc) "series_name" else "series_name,desc"
-                            3 -> if (sortAsc) "books_count" else "books_count,desc"
-                            4 -> if (sortAsc) "created_at" else "created_at,desc"
-                            else -> null
+                    sort = filter.values[filter.state]
+                }
+                is GenreFilter -> {
+                    filter.state.forEach { tri ->
+                        when (tri.state) {
+                            Filter.TriState.State.INCLUDE -> includedGenres.add(tri.name)
+                            Filter.TriState.State.EXCLUDE -> excludedGenres.add(tri.name)
+                            else -> {}
                         }
                     }
                 }
-                is Filter.CheckBox -> { /* no-op */ }
-                is Filter.Group<*> -> { /* no-op */ }
-                is Filter.Header -> { /* no-op */ }
-                is Filter.Select<*> -> { /* no-op */ }
-                is Filter.Separator -> { /* no-op */ }
-                is Filter.Text -> { /* no-op */ }
-                else -> { /* no-op for unknown filter types */ }
+                is TagFilter -> {
+                    filter.state.forEach { tri ->
+                        when (tri.state) {
+                            Filter.TriState.State.INCLUDE -> includedTags.add(tri.name)
+                            Filter.TriState.State.EXCLUDE -> excludedTags.add(tri.name)
+                            else -> {}
+                        }
+                    }
+                }
+                else -> {}
             }
         }
 
         val body = buildJsonObject {
-            put("sources", buildJsonArray { sources.forEach { add(JsonPrimitive(it)) } })
-            if (tags.isNotEmpty()) {
+            if (source != null && source.isNotEmpty() && source != "All") {
+                put("sources", buildJsonArray { add(JsonPrimitive(source!!)) })
+            }
+            if (includedGenres.isNotEmpty()) {
                 put(
-                    "inclusive_tags",
+                    "inclusive_genres",
                     buildJsonObject {
-                        put("values", buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } })
+                        put("values", buildJsonArray { includedGenres.forEach { add(JsonPrimitive(it)) } })
                         put("match_all", true)
                     },
                 )
             }
-            if (genres.isNotEmpty()) {
+            if (excludedGenres.isNotEmpty()) {
                 put(
-                    "inclusive_genres",
+                    "exclusive_genres",
                     buildJsonObject {
-                        put("values", buildJsonArray { genres.forEach { add(JsonPrimitive(it)) } })
+                        put("values", buildJsonArray { excludedGenres.forEach { add(JsonPrimitive(it)) } })
+                        put("match_all", true)
+                    },
+                )
+            }
+            if (includedTags.isNotEmpty()) {
+                put(
+                    "inclusive_tags",
+                    buildJsonObject {
+                        put("values", buildJsonArray { includedTags.forEach { add(JsonPrimitive(it)) } })
+                        put("match_all", true)
+                    },
+                )
+            }
+            if (excludedTags.isNotEmpty()) {
+                put(
+                    "exclusive_tags",
+                    buildJsonObject {
+                        put("values", buildJsonArray { excludedTags.forEach { add(JsonPrimitive(it)) } })
                         put("match_all", true)
                     },
                 )
@@ -198,7 +221,7 @@ class Kagane : HttpSource(), ConfigurableSource {
             addQueryParameter("mature", preferences.showNsfw.toString())
             addQueryParameter("size", "35")
             if (query.isNotBlank()) addQueryParameter("name", query)
-            if (sortField != null) addQueryParameter("sort", sortField)
+            if (sort != null && sort.isNotEmpty() && sort != "Relevance") addQueryParameter("sort", sort)
         }
         return POST(url.toString(), headers, body)
     }
@@ -368,7 +391,7 @@ class Kagane : HttpSource(), ConfigurableSource {
         arrays.reduce { acc, bytes -> acc + bytes }
 
     private fun getPssh(t: ByteArray): ByteArray {
-        val e = Base64.decode("7e+LqXnWSs6jyCfc1R0h7Q==", Base64.DEFAULT)
+        val e = android.util.Base64.decode("7e+LqXnWSs6jyCfc1R0h7Q==", android.util.Base64.DEFAULT)
         val zeroes = ByteArray(4)
         val i = byteArrayOf(18, t.size.toByte()) + t
         val s = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(i.size).array()
@@ -416,75 +439,15 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================= Filters ==============================
     // Robust genre/tags/source fetching (based on QiScans/EZmanga pattern)
-    // Fetches from kagane.org/search and parses SSR metadata
-
-    private var filterMeta: KaganeSsrMetadata? = null
-    private var fetchMetaAttempts = 0
-
-    private fun fetchKaganeFiltersJson() {
-        try {
-            val searchUrl = "$baseUrl/search"
-            val req = GET(searchUrl, headers)
-            val resp = client.newCall(req).execute()
-            val body = resp.body?.string() ?: return
-
-            val regex = Regex("\"ssrMetadata\"\\s*:\\s*(\\{.*?\\})[,}\\]]?", RegexOption.DOT_MATCHES_ALL)
-            val match = regex.find(body)
-            val metadataJson = match?.groups?.get(1)?.value
-            if (metadataJson != null) {
-                filterMeta = Json { ignoreUnknownKeys = true }
-                    .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
-            }
-        } catch (_: Throwable) {
-            // Error is ignored, will show header if failed
-        } finally {
-            fetchMetaAttempts++
-        }
-    }
-
+    // Only genre and tag are tristate; source and sort are single-select.
     override fun getFilterList(): FilterList {
-        if (filterMeta == null && fetchMetaAttempts < 3) {
-            // Fetch on background thread (doesn't block UI)
-            Observable.fromCallable { fetchKaganeFiltersJson() }
-                .subscribeOn(Schedulers.io())
-                .subscribe()
-        }
-
-        val filters = mutableListOf<Filter<*>>(
-            SortFilter(),
+        return FilterList(
+            listOf(
+                SourceFilter(),          // single-select
+                GenreFilter(),           // tristate
+                TagFilter(),             // tristate
+                SortFilter()             // single-select
+            )
         )
-        val meta = filterMeta
-        if (meta != null) {
-            filters.add(SourceFilter(meta.sources))
-            filters.add(GenreFilter(meta.genres.keys.toList()))
-            filters.add(TagFilter(meta.tags.keys.toList()))
-        } else {
-            filters.add(Filter.Header("Press 'Reset' to attempt to load filters"))
-        }
-        return FilterList(filters)
     }
-
-    class SourceFilter(sources: List<String>) : Filter.Group<String>("Source", sources) {
-        fun selected(): List<String> = state.filter { it.isNotBlank() }
-    }
-    class GenreFilter(genres: List<String>) : Filter.Group<String>("Genres", genres) {
-        fun selected(): List<String> = state.filter { it.isNotBlank() }
-    }
-    class TagFilter(tags: List<String>) : Filter.Group<String>("Tags", tags) {
-        fun selected(): List<String> = state.filter { it.isNotBlank() }
-    }
-    class SortFilter(
-        state: Int = 0,
-        ascending: Boolean = true,
-    ) : Filter.Sort(
-        "Sort By",
-        arrayOf(
-            "Relevance",
-            "Latest",
-            "By Name",
-            "Books count",
-            "Created at",
-        ),
-        Selection(state, ascending),
-    )
 }

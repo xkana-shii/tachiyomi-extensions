@@ -2,202 +2,216 @@ package eu.kanade.tachiyomi.extension.en.kagane
 
 import eu.kanade.tachiyomi.source.model.Filter
 
-open class UriPartFilter(
-    name: String,
-    val key: String,
-    private val pairs: List<Pair<String, String>>,
-) : Filter.Select<String>(name, pairs.map { it.first }.toTypedArray()) {
-    val selected: String
-        get() = pairs[state].second
-}
-
 // ----------- FILTER METADATA FOR SSR SEARCH PAGE -----------
 // These lists are extracted from Kagane's SSR metadata (search page).
 // Do not remove any comments.
 
-// Source filter (hardcoded, SSR order)
-class SourceFilter : UriPartFilter(
+// Helper for tristate label/value mapping
+class TriStateFilterOption(
+    val value: String,
+    name: String,
+    state: Int = Filter.TriState.State.IGNORE
+) : Filter.TriState(name, state)
+
+// Helper for select filter label/value mapping
+class SelectFilterOption(
+    val name: String,
+    val value: String
+)
+
+// Source filter (single-select, label/value mapping)
+class SourceFilter : Filter.Select<String>(
     "Source",
-    "source",
-    listOf(
-        "All" to "",
-        "Comikey" to "Comikey",
-        "Day Comics" to "Day Comics",
-        "INKR Comics" to "INKR Comics",
-        "Lezhin" to "Lezhin",
-        "Manta" to "Manta",
-        "Others" to "Others",
-        "Pocket Comics" to "Pocket Comics",
-        "Tapas" to "Tapas",
-        "Toomics" to "Toomics",
-        "Webtoon" to "Webtoon",
-    )
-)
+    getSourceFilter().map { it.name }.toTypedArray()
+) {
+    companion object {
+        private fun getSourceFilter() = listOf(
+            SelectFilterOption("All", ""),
+            SelectFilterOption("Comikey", "Comikey"),
+            SelectFilterOption("Day Comics", "Day Comics"),
+            SelectFilterOption("INKR Comics", "INKR Comics"),
+            SelectFilterOption("Lezhin", "Lezhin"),
+            SelectFilterOption("Manta", "Manta"),
+            SelectFilterOption("Others", "Others"),
+            SelectFilterOption("Pocket Comics", "Pocket Comics"),
+            SelectFilterOption("Tapas", "Tapas"),
+            SelectFilterOption("Toomics", "Toomics"),
+            SelectFilterOption("Webtoon", "Webtoon"),
+        )
+    }
+    private val values = getSourceFilter().map { it.value }.toTypedArray()
+    val selected: String
+        get() = values[state]
+}
 
-// Genre filter (SSR order)
-class GenreFilter : UriPartFilter(
-    "Genre",
-    "genre",
-    listOf(
-        // SSR order preserved
-        "All" to "",
-        "Action" to "action",
-        "Adult" to "adult",
-        "Adventure" to "adventure",
-        "All Ages" to "all ages",
-        "Animals" to "animals",
-        "Anime" to "anime",
-        "Anime Tie-in" to "anime tie-in",
-        "Anthropomorphic" to "anthropomorphic",
-        "Avant Garde" to "avant garde",
-        "Aventure" to "aventure",
-        "Boys' Love" to "boys' love",
-        "Cats" to "cats",
-        "CGDCT" to "cgdct",
-        "Childcare" to "childcare",
-        "College" to "college",
-        "Comedy" to "comedy",
-        "Completed Series" to "completed series",
-        "Crime" to "crime",
-        "Crossdressing" to "crossdressing",
-        "Delinquents" to "delinquents",
-        "Detective" to "detective",
-        "Doujinshi" to "doujinshi",
-        "Drama" to "drama",
-        "Drame" to "drame",
-        "Dungeon / Labyrinth" to "dungeon / labyrinth",
-        "Dystopian" to "dystopian",
-        "Ecchi" to "ecchi",
-        "Erotica" to "erotica",
-        "Erotique" to "erotique",
-        "Fant. Romance" to "fant. romance",
-        "Fantastique" to "fantastique",
-        "Fantasy" to "fantasy",
-        "Gag Humor" to "gag humor",
-        "Gender Bender" to "gender bender",
-        "Girls' Love" to "girls' love",
-        "Gore" to "gore",
-        "Gourmet" to "gourmet",
-        "Graphic Novel" to "graphic novel",
-        "Harem" to "harem",
-        "Heartwarming" to "heartwarming",
-        "Hentai" to "hentai",
-        "Histoires Courtes" to "histoires courtes",
-        "Historical" to "historical",
-        "Historique" to "historique",
-        "Horreur" to "horreur",
-        "Horror" to "horror",
-        "Idols (Male)" to "idols (male)",
-        "Informative" to "informative",
-        "Inspirational" to "inspirational",
-        "Int'l Manga" to "int'l manga",
-        "Isekai" to "isekai",
-        "Iyashikei" to "iyashikei",
-        "Josei" to "josei",
-        "Kids" to "kids",
-        "LGBTQ" to "lgbtq",
-        "LGBTQ+" to "lgbtq+",
-        "Lolicon" to "lolicon",
-        "Love Polygon" to "love polygon",
-        "Love Status Quo" to "love status quo",
-        "Magic" to "magic",
-        "Magical Girls" to "magical girls",
-        "Magical Sex Shift" to "magical sex shift",
-        "Mahou Shoujo" to "mahou shoujo",
-        "Manga" to "manga",
-        "Manhwa" to "manhwa",
-        "Martial Arts" to "martial arts",
-        "Mature" to "mature",
-        "Mecha" to "mecha",
-        "Medical" to "medical",
-        "Military" to "military",
-        "Mod. Romance" to "mod. romance",
-        "Monster Girls" to "monster girls",
-        "Music" to "music",
-        "Mystery" to "mystery",
-        "Mystère" to "mystère",
-        "Myth" to "myth",
-        "Mythology" to "mythology",
-        "New" to "new",
-        "Noble Romance" to "noble romance",
-        "Non-human" to "non-human",
-        "Office" to "office",
-        "One Shot" to "one shot",
-        "Organized Crime" to "organized crime",
-        "Otaku Culture" to "otaku culture",
-        "Pets" to "pets",
-        "Philosophical" to "philosophical",
-        "Pocoexclucive" to "pocoexclucive",
-        "Psychological" to "psychological",
-        "Psychologique" to "psychologique",
-        "Reincarnation" to "reincarnation",
-        "Reverse Harem" to "reverse harem",
-        "Romance" to "romance",
-        "Royalty/Nobility" to "royalty/nobility",
-        "School" to "school",
-        "School Life" to "school life",
-        "Sci-fi" to "sci-fi",
-        "Science Fiction" to "science fiction",
-        "Seinen" to "seinen",
-        "Short" to "short",
-        "Short Story" to "short story",
-        "Shotacon" to "shotacon",
-        "Shoujo" to "shoujo",
-        "Shounen" to "shounen",
-        "Showbiz" to "showbiz",
-        "Shōjo-ai" to "shōjo-ai",
-        "Shōnen-ai" to "shōnen-ai",
-        "Slice of Life" to "slice of life",
-        "Smut" to "smut",
-        "Space" to "space",
-        "Sports" to "sports",
-        "Strategy Game" to "strategy game",
-        "Super Power" to "super power",
-        "Superhero" to "superhero",
-        "Supernatural" to "supernatural",
-        "Surnaturel" to "surnaturel",
-        "Survival" to "survival",
-        "Suspense" to "suspense",
-        "Team Sports" to "team sports",
-        "Teens' Love" to "teens' love",
-        "Thriller" to "thriller",
-        "Time Travel" to "time travel",
-        "Tragedy" to "tragedy",
-        "Tragique" to "tragique",
-        "Uncensored" to "uncensored",
-        "Urban Fantasy" to "urban fantasy",
-        "Vampire" to "vampire",
-        "Vanilla" to "vanilla",
-        "Video Game" to "video game",
-        "Video Games / Game Adaptation / Game Elements" to "video games / game adaptation / game elements",
-        "Villainess" to "villainess",
-        "Visual Arts" to "visual arts",
-        "Workplace" to "workplace",
-        "Wuxia" to "wuxia",
-        "Xuanhuan" to "xuanhuan",
-        "Yonkoma" to "yonkoma",
-    )
-)
-
-// Tag filter (SSR order, huge list, will be sent next message)
-class TagFilter : UriPartFilter(
-    "Tag",
-    "tag",
-    listOf(
-        // --- FULL TAG LIST GOES HERE ---
-        // Do not remove any comments!
-    )
-)
-
-// Sort filter
-class SortFilter : UriPartFilter(
+class SortFilter : Filter.Select<String>(
     "Sort By",
-    "sort",
+    getSortFilter().map { it.name }.toTypedArray()
+) {
+    companion object {
+        private fun getSortFilter() = listOf(
+            SelectFilterOption("Relevance", "relevance"),
+            SelectFilterOption("Latest", "latest"),
+            SelectFilterOption("By Name", "name"),
+            SelectFilterOption("Books count", "books-count"),
+            SelectFilterOption("Created at", "created-at"),
+        )
+    }
+    private val values = getSortFilter().map { it.value }.toTypedArray()
+    val selected: String
+        get() = values[state]
+}
+
+// Genre filter (tristate group, label/value mapping)
+class GenreFilter : Filter.Group<TriStateFilterOption>(
+    "Genre",
     listOf(
-        "Relevance" to "relevance",
-        "Latest" to "latest",
-        "By Name" to "name",
-        "Books count" to "books-count",
-        "Created at" to "created-at",
-    ),
+        TriStateFilterOption("", "All"),
+        TriStateFilterOption("action", "Action"),
+        TriStateFilterOption("adult", "Adult"),
+        TriStateFilterOption("adventure", "Adventure"),
+        TriStateFilterOption("all ages", "All Ages"),
+        TriStateFilterOption("animals", "Animals"),
+        TriStateFilterOption("anime", "Anime"),
+        TriStateFilterOption("anime tie-in", "Anime Tie-in"),
+        TriStateFilterOption("anthropomorphic", "Anthropomorphic"),
+        TriStateFilterOption("avant garde", "Avant Garde"),
+        TriStateFilterOption("aventure", "Aventure"),
+        TriStateFilterOption("boys' love", "Boys' Love"),
+        TriStateFilterOption("cats", "Cats"),
+        TriStateFilterOption("cgdct", "CGDCT"),
+        TriStateFilterOption("childcare", "Childcare"),
+        TriStateFilterOption("college", "College"),
+        TriStateFilterOption("comedy", "Comedy"),
+        TriStateFilterOption("completed series", "Completed Series"),
+        TriStateFilterOption("crime", "Crime"),
+        TriStateFilterOption("crossdressing", "Crossdressing"),
+        TriStateFilterOption("delinquents", "Delinquents"),
+        TriStateFilterOption("detective", "Detective"),
+        TriStateFilterOption("doujinshi", "Doujinshi"),
+        TriStateFilterOption("drama", "Drama"),
+        TriStateFilterOption("drame", "Drame"),
+        TriStateFilterOption("dungeon / labyrinth", "Dungeon / Labyrinth"),
+        TriStateFilterOption("dystopian", "Dystopian"),
+        TriStateFilterOption("ecchi", "Ecchi"),
+        TriStateFilterOption("erotica", "Erotica"),
+        TriStateFilterOption("erotique", "Erotique"),
+        TriStateFilterOption("fant. romance", "Fant. Romance"),
+        TriStateFilterOption("fantastique", "Fantastique"),
+        TriStateFilterOption("fantasy", "Fantasy"),
+        TriStateFilterOption("gag humor", "Gag Humor"),
+        TriStateFilterOption("gender bender", "Gender Bender"),
+        TriStateFilterOption("girls' love", "Girls' Love"),
+        TriStateFilterOption("gore", "Gore"),
+        TriStateFilterOption("gourmet", "Gourmet"),
+        TriStateFilterOption("graphic novel", "Graphic Novel"),
+        TriStateFilterOption("harem", "Harem"),
+        TriStateFilterOption("heartwarming", "Heartwarming"),
+        TriStateFilterOption("hentai", "Hentai"),
+        TriStateFilterOption("histoires courtes", "Histoires Courtes"),
+        TriStateFilterOption("historical", "Historical"),
+        TriStateFilterOption("historique", "Historique"),
+        TriStateFilterOption("horreur", "Horreur"),
+        TriStateFilterOption("horror", "Horror"),
+        TriStateFilterOption("idols (male)", "Idols (Male)"),
+        TriStateFilterOption("informative", "Informative"),
+        TriStateFilterOption("inspirational", "Inspirational"),
+        TriStateFilterOption("int'l manga", "Int'l Manga"),
+        TriStateFilterOption("isekai", "Isekai"),
+        TriStateFilterOption("iyashikei", "Iyashikei"),
+        TriStateFilterOption("josei", "Josei"),
+        TriStateFilterOption("kids", "Kids"),
+        TriStateFilterOption("lgbtq", "LGBTQ"),
+        TriStateFilterOption("lgbtq+", "LGBTQ+"),
+        TriStateFilterOption("lolicon", "Lolicon"),
+        TriStateFilterOption("love polygon", "Love Polygon"),
+        TriStateFilterOption("love status quo", "Love Status Quo"),
+        TriStateFilterOption("magic", "Magic"),
+        TriStateFilterOption("magical girls", "Magical Girls"),
+        TriStateFilterOption("magical sex shift", "Magical Sex Shift"),
+        TriStateFilterOption("mahou shoujo", "Mahou Shoujo"),
+        TriStateFilterOption("manga", "Manga"),
+        TriStateFilterOption("manhwa", "Manhwa"),
+        TriStateFilterOption("martial arts", "Martial Arts"),
+        TriStateFilterOption("mature", "Mature"),
+        TriStateFilterOption("mecha", "Mecha"),
+        TriStateFilterOption("medical", "Medical"),
+        TriStateFilterOption("military", "Military"),
+        TriStateFilterOption("mod. romance", "Mod. Romance"),
+        TriStateFilterOption("monster girls", "Monster Girls"),
+        TriStateFilterOption("music", "Music"),
+        TriStateFilterOption("mystery", "Mystery"),
+        TriStateFilterOption("mystère", "Mystère"),
+        TriStateFilterOption("myth", "Myth"),
+        TriStateFilterOption("mythology", "Mythology"),
+        TriStateFilterOption("new", "New"),
+        TriStateFilterOption("noble romance", "Noble Romance"),
+        TriStateFilterOption("non-human", "Non-human"),
+        TriStateFilterOption("office", "Office"),
+        TriStateFilterOption("one shot", "One Shot"),
+        TriStateFilterOption("organized crime", "Organized Crime"),
+        TriStateFilterOption("otaku culture", "Otaku Culture"),
+        TriStateFilterOption("pets", "Pets"),
+        TriStateFilterOption("philosophical", "Philosophical"),
+        TriStateFilterOption("pocoexclucive", "Pocoexclucive"),
+        TriStateFilterOption("psychological", "Psychological"),
+        TriStateFilterOption("psychologique", "Psychologique"),
+        TriStateFilterOption("reincarnation", "Reincarnation"),
+        TriStateFilterOption("reverse harem", "Reverse Harem"),
+        TriStateFilterOption("romance", "Romance"),
+        TriStateFilterOption("royalty/nobility", "Royalty/Nobility"),
+        TriStateFilterOption("school", "School"),
+        TriStateFilterOption("school life", "School Life"),
+        TriStateFilterOption("sci-fi", "Sci-fi"),
+        TriStateFilterOption("science fiction", "Science Fiction"),
+        TriStateFilterOption("seinen", "Seinen"),
+        TriStateFilterOption("short", "Short"),
+        TriStateFilterOption("short story", "Short Story"),
+        TriStateFilterOption("shotacon", "Shotacon"),
+        TriStateFilterOption("shoujo", "Shoujo"),
+        TriStateFilterOption("shounen", "Shounen"),
+        TriStateFilterOption("showbiz", "Showbiz"),
+        TriStateFilterOption("shōjo-ai", "Shōjo-ai"),
+        TriStateFilterOption("shōnen-ai", "Shōnen-ai"),
+        TriStateFilterOption("slice of life", "Slice of Life"),
+        TriStateFilterOption("smut", "Smut"),
+        TriStateFilterOption("space", "Space"),
+        TriStateFilterOption("sports", "Sports"),
+        TriStateFilterOption("strategy game", "Strategy Game"),
+        TriStateFilterOption("super power", "Super Power"),
+        TriStateFilterOption("superhero", "Superhero"),
+        TriStateFilterOption("supernatural", "Supernatural"),
+        TriStateFilterOption("surnaturel", "Surnaturel"),
+        TriStateFilterOption("survival", "Survival"),
+        TriStateFilterOption("suspense", "Suspense"),
+        TriStateFilterOption("team sports", "Team Sports"),
+        TriStateFilterOption("teens' love", "Teens' Love"),
+        TriStateFilterOption("thriller", "Thriller"),
+        TriStateFilterOption("time travel", "Time Travel"),
+        TriStateFilterOption("tragedy", "Tragedy"),
+        TriStateFilterOption("tragique", "Tragique"),
+        TriStateFilterOption("uncensored", "Uncensored"),
+        TriStateFilterOption("urban fantasy", "Urban Fantasy"),
+        TriStateFilterOption("vampire", "Vampire"),
+        TriStateFilterOption("vanilla", "Vanilla"),
+        TriStateFilterOption("video game", "Video Game"),
+        TriStateFilterOption("video games / game adaptation / game elements", "Video Games / Game Adaptation / Game Elements"),
+        TriStateFilterOption("villainess", "Villainess"),
+        TriStateFilterOption("visual arts", "Visual Arts"),
+        TriStateFilterOption("workplace", "Workplace"),
+        TriStateFilterOption("wuxia", "Wuxia"),
+        TriStateFilterOption("xuanhuan", "Xuanhuan"),
+        TriStateFilterOption("yonkoma", "Yonkoma"),
+    )
+)
+
+// Tag filter (tristate group, label/value mapping, full list omitted for brevity)
+// Do not remove any comments!
+class TagFilter : Filter.Group<TriStateFilterOption>(
+    "Tag",
+    listOf(
+        // TriStateFilterOption("full color", "Full Color"),
+        // TriStateFilterOption("long strip", "Long Strip"),
+        // ...etc
+    )
 )

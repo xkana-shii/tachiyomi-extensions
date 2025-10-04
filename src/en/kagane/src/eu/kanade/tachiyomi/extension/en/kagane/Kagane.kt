@@ -43,6 +43,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.IOException
 import rx.Observable
+import rx.schedulers.Schedulers
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.nio.ByteBuffer
@@ -54,13 +55,10 @@ import java.util.concurrent.TimeUnit
 class Kagane : HttpSource(), ConfigurableSource {
 
     override val name = "Kagane"
-
     private val domain = "kagane.org"
     private val apiUrl = "https://api.$domain"
     override val baseUrl = "https://$domain"
-
     override val lang = "en"
-
     override val supportsLatest = true
 
     private val preferences by getPreferencesLazy()
@@ -69,17 +67,14 @@ class Kagane : HttpSource(), ConfigurableSource {
         .cookieJar(
             object : CookieJar {
                 private val cookieManager by lazy { CookieManager.getInstance() }
-
                 override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
                     val urlString = url.toString()
                     cookies.forEach { cookieManager.setCookie(urlString, it.toString()) }
                 }
-
                 override fun loadForRequest(url: HttpUrl): List<Cookie> {
                     val cookies = cookieManager.getCookie(url.toString()).orEmpty()
                     val cookieList = mutableListOf<Cookie>()
                     var hasNsfwCookie = false
-
                     cookies.split(";").mapNotNullTo(cookieList) { c ->
                         var cookieValue = c
                         if (url.host == domain && c.contains("kagane_mature_content")) {
@@ -87,16 +82,11 @@ class Kagane : HttpSource(), ConfigurableSource {
                             val (key, _) = c.split("=")
                             cookieValue = "$key=${preferences.showNsfw}"
                         }
-
                         Cookie.parse(url, cookieValue)
                     }
-
                     if (!hasNsfwCookie && url.host == domain) {
-                        Cookie.parse(url, "kagane_mature_content=${preferences.showNsfw}")?.let {
-                            cookieList.add(it)
-                        }
+                        Cookie.parse(url, "kagane_mature_content=${preferences.showNsfw}")?.let { cookieList.add(it) }
                     }
-
                     return cookieList
                 }
             },
@@ -112,17 +102,11 @@ class Kagane : HttpSource(), ConfigurableSource {
         if (!url.queryParameterNames.contains("token")) {
             return chain.proceed(request)
         }
-
         val seriesId = url.pathSegments[3]
         val chapterId = url.pathSegments[5]
-
         var response = chain.proceed(
             request.newBuilder()
-                .url(
-                    url.newBuilder()
-                        .setQueryParameter("token", accessToken)
-                        .build(),
-                )
+                .url(url.newBuilder().setQueryParameter("token", accessToken).build())
                 .build(),
         )
         if (response.code == 401) {
@@ -135,47 +119,29 @@ class Kagane : HttpSource(), ConfigurableSource {
             accessToken = challenge.accessToken
             response = chain.proceed(
                 request.newBuilder()
-                    .url(
-                        url.newBuilder()
-                            .setQueryParameter("token", accessToken)
-                            .build(),
-                    )
+                    .url(url.newBuilder().setQueryParameter("token", accessToken).build())
                     .build(),
             )
         }
-
         return response
     }
 
     // ============================== Popular ===============================
-
     override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList())
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
-
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(
-            page,
-            "",
-            FilterList(
-                SortFilter(
-                    0,
-                    true,
-                ),
-            ),
-        )
-
+        searchMangaRequest(page, "", FilterList(SortFilter(0, true)))
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
-
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         var sources = emptyList<String>()
         var genres = emptyList<String>()
         var tags = emptyList<String>()
         var sortField: String? = null
-        var sortAsc = true
+        var sortAsc: Boolean
 
         filters.forEach { filter ->
             when (filter) {
@@ -195,34 +161,23 @@ class Kagane : HttpSource(), ConfigurableSource {
                         }
                     }
                 }
-                is Filter.CheckBox,
-                is Filter.Group<*>,
-                is Filter.Header,
-                is Filter.Select<*>,
-                is Filter.Separator,
-                is Filter.Text,
-                -> {}
-                else -> {}
+                is Filter.CheckBox -> { /* no-op */ }
+                is Filter.Group<*> -> { /* no-op */ }
+                is Filter.Header -> { /* no-op */ }
+                is Filter.Select<*> -> { /* no-op */ }
+                is Filter.Separator -> { /* no-op */ }
+                is Filter.Text -> { /* no-op */ }
+                else -> { /* no-op for unknown filter types */ }
             }
         }
 
         val body = buildJsonObject {
-            put(
-                "sources",
-                buildJsonArray {
-                    sources.forEach { add(JsonPrimitive(it)) }
-                },
-            )
+            put("sources", buildJsonArray { sources.forEach { add(JsonPrimitive(it)) } })
             if (tags.isNotEmpty()) {
                 put(
                     "inclusive_tags",
                     buildJsonObject {
-                        put(
-                            "values",
-                            buildJsonArray {
-                                tags.forEach { add(JsonPrimitive(it)) }
-                            },
-                        )
+                        put("values", buildJsonArray { tags.forEach { add(JsonPrimitive(it)) } })
                         put("match_all", true)
                     },
                 )
@@ -231,12 +186,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                 put(
                     "inclusive_genres",
                     buildJsonObject {
-                        put(
-                            "values",
-                            buildJsonArray {
-                                genres.forEach { add(JsonPrimitive(it)) }
-                            },
-                        )
+                        put("values", buildJsonArray { genres.forEach { add(JsonPrimitive(it)) } })
                         put("match_all", true)
                     },
                 )
@@ -246,15 +196,10 @@ class Kagane : HttpSource(), ConfigurableSource {
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
             addQueryParameter("mature", preferences.showNsfw.toString())
-            addQueryParameter("size", 35.toString()) // Default items per request
-            if (query.isNotBlank()) {
-                addQueryParameter("name", query)
-            }
-            if (sortField != null) {
-                addQueryParameter("sort", sortField)
-            }
+            addQueryParameter("size", "35")
+            if (query.isNotBlank()) addQueryParameter("name", query)
+            if (sortField != null) addQueryParameter("sort", sortField)
         }
-
         return POST(url.toString(), headers, body)
     }
 
@@ -265,7 +210,6 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // =========================== Manga Details ============================
-
     override fun mangaDetailsParse(response: Response): SManga {
         val dto = response.parseAs<DetailsDto>()
         return dto.data.toSManga()
@@ -276,7 +220,6 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // ============================== Chapters ==============================
-
     override fun chapterListParse(response: Response): List<SChapter> {
         val dto = response.parseAs<ChapterDto>()
         return dto.data.content.map { it.toSChapter() }.reversed()
@@ -287,7 +230,6 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // =============================== Pages ================================
-
     private val apiHeaders = headers.newBuilder().apply {
         add("Origin", baseUrl)
         add("Referer", "$baseUrl/")
@@ -301,7 +243,6 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
         val (seriesId, chapterId) = chapter.url.split(";")
-
         val challengeResp = getChallengeResponse(seriesId, chapterId)
         accessToken = challengeResp.accessToken
         val pageCount = getPageCountResponse(seriesId, chapterId)
@@ -313,17 +254,14 @@ class Kagane : HttpSource(), ConfigurableSource {
                 addPathSegment((page + 1).toString())
                 addQueryParameter("token", accessToken)
             }.build().toString()
-
             Page(page, imageUrl = pageUrl)
         }
-
         return Observable.just(pages)
     }
 
     private var accessToken: String = ""
     private fun getChallengeResponse(seriesId: String, chapterId: String): ChallengeDto {
         val f = "$seriesId:$chapterId".sha256().sliceArray(0 until 16)
-
         val interfaceName = "jsInterface"
         val html = """
             <!DOCTYPE html>
@@ -342,7 +280,6 @@ class Kagane : HttpSource(), ConfigurableSource {
                         }
                         return bytes.buffer;
                     }
-
                     async function getData() {
                         const g = base64ToArrayBuffer("${getCertificate()}");
                         let t = await navigator.requestMediaKeySystemAccess("com.widevine.alpha", [{
@@ -352,7 +289,6 @@ class Kagane : HttpSource(), ConfigurableSource {
                             contentType: 'video/mp4; codecs="avc1.42E01E"'
                           }]
                         }]);
-
                         let e = await t.createMediaKeys();
                         await e.setServerCertificate(g);
                         let n = e.createSession();
@@ -361,16 +297,13 @@ class Kagane : HttpSource(), ConfigurableSource {
                             n.removeEventListener("message", onMessage);
                             resolve(event.message);
                           }
-
                           function onError() {
                             n.removeEventListener("error", onError);
                             reject(new Error("Failed to generate license challenge"));
                           }
-
                           n.addEventListener("message", onMessage);
                           n.addEventListener("error", onError);
                         });
-
                         await n.generateRequest("cenc", base64ToArrayBuffer("${getPssh(f).toBase64()}"));
                         let o = await i;
                         let m = new Uint8Array(o);
@@ -390,7 +323,6 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         handler.post {
             val innerWv = WebView(Injekt.get<Application>())
-
             webView = innerWv
             innerWv.settings.domStorageEnabled = true
             innerWv.settings.javaScriptEnabled = true
@@ -398,7 +330,6 @@ class Kagane : HttpSource(), ConfigurableSource {
             innerWv.settings.userAgentString = headers["User-Agent"]
             innerWv.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             innerWv.addJavascriptInterface(jsInterface, interfaceName)
-
             innerWv.webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest?) {
                     if (request?.resources?.contains(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID) == true) {
@@ -408,20 +339,14 @@ class Kagane : HttpSource(), ConfigurableSource {
                     }
                 }
             }
-
             innerWv.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
         }
 
         latch.await(10, TimeUnit.SECONDS)
         handler.post { webView?.destroy() }
 
-        if (latch.count == 1L) {
-            throw Exception("Timed out getting drm challenge")
-        }
-
-        if (jsInterface.challenge.isEmpty()) {
-            throw Exception("Failed to get drm challenge")
-        }
+        if (latch.count == 1L) throw Exception("Timed out getting drm challenge")
+        if (jsInterface.challenge.isEmpty()) throw Exception("Failed to get drm challenge")
 
         val challengeUrl = "$apiUrl/api/v1/books/$seriesId/file/$chapterId"
         val challengeBody = buildJsonObject {
@@ -434,10 +359,8 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     private fun getPageCountResponse(seriesId: String, chapterId: String): Int {
         val challengeUrl = "$apiUrl/api/v1/books/$seriesId/metadata/$chapterId"
-
         val dto = client.newCall(GET(challengeUrl, apiHeaders)).execute()
             .parseAs<PagesCountDto>()
-
         return dto.data.media.pagesCount
     }
 
@@ -447,14 +370,11 @@ class Kagane : HttpSource(), ConfigurableSource {
     private fun getPssh(t: ByteArray): ByteArray {
         val e = Base64.decode("7e+LqXnWSs6jyCfc1R0h7Q==", Base64.DEFAULT)
         val zeroes = ByteArray(4)
-
         val i = byteArrayOf(18, t.size.toByte()) + t
         val s = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(i.size).array()
-
         val innerBox = concat(zeroes, e, s, i)
         val outerSize = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(innerBox.size + 8).array()
         val psshHeader = "pssh".toByteArray(StandardCharsets.UTF_8)
-
         return concat(outerSize, psshHeader, innerBox)
     }
 
@@ -476,16 +396,13 @@ class Kagane : HttpSource(), ConfigurableSource {
     override fun pageListParse(response: Response): List<Page> {
         throw UnsupportedOperationException()
     }
-
     override fun imageUrlParse(response: Response): String {
         throw UnsupportedOperationException()
     }
 
     // ============================ Preferences =============================
-
     private val SharedPreferences.showNsfw
         get() = this.getBoolean(SHOW_NSFW_KEY, true)
-
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
             key = SHOW_NSFW_KEY
@@ -493,39 +410,58 @@ class Kagane : HttpSource(), ConfigurableSource {
             setDefaultValue(true)
         }.let(screen::addPreference)
     }
-
-    // ============================= Utilities ==============================
-
     companion object {
         private const val SHOW_NSFW_KEY = "pref_show_nsfw"
     }
 
     // ============================= Filters ==============================
+    // Robust genre/tags/source fetching (based on QiScans/EZmanga pattern)
+    // Fetches from kagane.org/search and parses SSR metadata
 
-    private fun fetchKaganeFiltersJson(): KaganeSsrMetadata? {
-        return try {
+    private var filterMeta: KaganeSsrMetadata? = null
+    private var fetchMetaAttempts = 0
+
+    private fun fetchKaganeFiltersJson() {
+        try {
             val searchUrl = "$baseUrl/search"
             val req = GET(searchUrl, headers)
             val resp = client.newCall(req).execute()
-            val body = resp.body?.string() ?: return null
+            val body = resp.body?.string() ?: return
 
-            // Try to extract the SSR metadata JSON robustly
             val regex = Regex("\"ssrMetadata\"\\s*:\\s*(\\{.*?\\})[,}\\]]?", RegexOption.DOT_MATCHES_ALL)
             val match = regex.find(body)
             val metadataJson = match?.groups?.get(1)?.value
-            if (metadataJson == null) {
-                // Could not find ssrMetadata in /search page!
-                return null
+            if (metadataJson != null) {
+                filterMeta = Json { ignoreUnknownKeys = true }
+                    .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
             }
-            // println("Extracted ssrMetadata: $metadataJson")
-
-            Json { ignoreUnknownKeys = true }
-                .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
         } catch (_: Throwable) {
-            // Catch everything, log if needed, return null to prevent crash
-            // e.printStackTrace()
-            null
+            // Error is ignored, will show header if failed
+        } finally {
+            fetchMetaAttempts++
         }
+    }
+
+    override fun getFilterList(): FilterList {
+        if (filterMeta == null && fetchMetaAttempts < 3) {
+            // Fetch on background thread (doesn't block UI)
+            Observable.fromCallable { fetchKaganeFiltersJson() }
+                .subscribeOn(Schedulers.io())
+                .subscribe()
+        }
+
+        val filters = mutableListOf<Filter<*>>(
+            SortFilter(),
+        )
+        val meta = filterMeta
+        if (meta != null) {
+            filters.add(SourceFilter(meta.sources))
+            filters.add(GenreFilter(meta.genres.keys.toList()))
+            filters.add(TagFilter(meta.tags.keys.toList()))
+        } else {
+            filters.add(Filter.Header("Press 'Reset' to attempt to load filters"))
+        }
+        return FilterList(filters)
     }
 
     class SourceFilter(sources: List<String>) : Filter.Group<String>("Source", sources) {
@@ -537,45 +473,18 @@ class Kagane : HttpSource(), ConfigurableSource {
     class TagFilter(tags: List<String>) : Filter.Group<String>("Tags", tags) {
         fun selected(): List<String> = state.filter { it.isNotBlank() }
     }
-
-    // Filter.Sort with ascending/descending toggle (click twice to change direction)
     class SortFilter(
         state: Int = 0,
         ascending: Boolean = true,
     ) : Filter.Sort(
         "Sort By",
         arrayOf(
-            "Relevance", // index 0 (no sort param)
-            "Latest", // index 1
-            "By Name", // index 2
-            "Books count", // index 3
-            "Created at", // index 4
+            "Relevance",
+            "Latest",
+            "By Name",
+            "Books count",
+            "Created at",
         ),
         Selection(state, ascending),
     )
-
-    // Now catch everything in getFilterList to prevent crashes and always return a safe filter list
-    override fun getFilterList(): FilterList {
-        return try {
-            val meta = fetchKaganeFiltersJson()
-            val sourceList = meta?.sources ?: emptyList()
-            val genreList = meta?.genres?.keys?.toList() ?: emptyList()
-            val tagList = meta?.tags?.keys?.toList() ?: emptyList()
-            FilterList(
-                SortFilter(),
-                SourceFilter(sourceList),
-                GenreFilter(genreList),
-                TagFilter(tagList),
-            )
-        } catch (_: Throwable) {
-            // Catch everything, show empty filter list to prevent crash
-            // e.printStackTrace()
-            FilterList(
-                SortFilter(),
-                SourceFilter(emptyList()),
-                GenreFilter(emptyList()),
-                TagFilter(emptyList()),
-            )
-        }
-    }
 }

@@ -1,14 +1,7 @@
 package eu.kanade.tachiyomi.extension.en.kagane
 
 import eu.kanade.tachiyomi.source.model.Filter
-import eu.kanade.tachiyomi.source.model.FilterList
 
-override fun getFilterList() = FilterList(
-    SortFilter(getSortFilter().map { it.name }.toTypedArray()),
-    GenreGroupFilter(getGenreFilter()),
-    TagGroupFilter(getTagFilter()),
-    OriginGroupFilter(getSourceFilter()),
-)
 class SelectFilterOption(val name: String, val value: String)
 class CheckboxFilterOption(val value: String, name: String, default: Boolean = false) : Filter.CheckBox(name, default)
 class TriStateFilterOption(val value: String, name: String, default: Int = 0) : Filter.TriState(name, default)
@@ -26,7 +19,6 @@ abstract class CheckboxGroupFilter(name: String, options: List<CheckboxFilterOpt
 abstract class TriStateGroupFilter(name: String, options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>(name, options) {
     val included: List<String>
         get() = state.filter { it.isIncluded() }.map { it.value }
-
     val excluded: List<String>
         get() = state.filter { it.isExcluded() }.map { it.value }
 }
@@ -35,10 +27,9 @@ class SortFilter(sortables: Array<String>) : Filter.Sort("Sort", sortables, Sele
 class SourceFilter(options: List<SelectFilterOption>, default: Int) : SelectFilter("Source", options, default)
 class OriginGroupFilter(options: List<CheckboxFilterOption>) : CheckboxGroupFilter("Origin", options)
 class GenreGroupFilter(options: List<TriStateFilterOption>) : TriStateGroupFilter("Genre", options)
-
 class TagGroupFilter(options: List<TriStateFilterOption>) : TriStateGroupFilter("Tag", options)
 
-private fun getSortFilter() = listOf(
+fun getSortFilter() = listOf(
     SelectFilterOption("Relevance", "relevance"),
     SelectFilterOption("Latest", "latest"),
     SelectFilterOption("By Name", "name"),
@@ -46,7 +37,7 @@ private fun getSortFilter() = listOf(
     SelectFilterOption("Created at", "created-at"),
 )
 
-private fun getSourceFilter() = listOf(
+fun getSourceFilter() = listOf(
     CheckboxFilterOption("All", ""),
     CheckboxFilterOption("Comikey", "Comikey"),
     CheckboxFilterOption("Day Comics", "Day Comics"),
@@ -60,7 +51,7 @@ private fun getSourceFilter() = listOf(
     CheckboxFilterOption("Webtoon", "Webtoon"),
 )
 
-private fun getGenreFilter() = listOf(
+fun getGenreFilter() = listOf(
     TriStateFilterOption("", "All"),
     TriStateFilterOption("action", "Action"),
     TriStateFilterOption("adult", "Adult"),
@@ -199,7 +190,7 @@ private fun getGenreFilter() = listOf(
     TriStateFilterOption("yonkoma", "Yonkoma"),
 )
 
-private fun getTagFilter() = listOf(
+fun getTagFilter() = listOf(
     TriStateFilterOption("", "All"),
     TriStateFilterOption("action", "Action"),
 )

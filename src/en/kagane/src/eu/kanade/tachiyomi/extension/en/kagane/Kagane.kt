@@ -130,7 +130,7 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter()))
+        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter().map { it.name }.toTypedArray())))
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
@@ -145,32 +145,20 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         filters.forEach { filter ->
             when (filter) {
-                is SourceFilter -> {
-                    // Single-select: use selected value
-                    source = filter.values[filter.state]
+                is OriginGroupFilter -> {
+                    source = filter.selected.firstOrNull() // Source is checkboxes; use first selected (or join if API supports multiple)
                 }
                 is SortFilter -> {
-                    sort = filter.values[filter.state]
+                    sort = filter.selected
                 }
-                is GenreFilter -> {
-                    filter.state.forEach { tri ->
-                        when (tri.state) {
-                            Filter.TriState.State.INCLUDE -> includedGenres.add(tri.name)
-                            Filter.TriState.State.EXCLUDE -> excludedGenres.add(tri.name)
-                            else -> {}
-                        }
-                    }
+                is GenreGroupFilter -> {
+                    includedGenres.addAll(filter.included)
+                    excludedGenres.addAll(filter.excluded)
                 }
-                is TagFilter -> {
-                    filter.state.forEach { tri ->
-                        when (tri.state) {
-                            Filter.TriState.State.INCLUDE -> includedTags.add(tri.name)
-                            Filter.TriState.State.EXCLUDE -> excludedTags.add(tri.name)
-                            else -> {}
-                        }
-                    }
+                is TagGroupFilter -> {
+                    includedTags.addAll(filter.included)
+                    excludedTags.addAll(filter.excluded)
                 }
-                else -> {}
             }
         }
 
@@ -442,12 +430,10 @@ class Kagane : HttpSource(), ConfigurableSource {
     // Only genre and tag are tristate; source and sort are single-select.
     override fun getFilterList(): FilterList {
         return FilterList(
-            listOf(
-                SourceFilter(),          // single-select
-                GenreFilter(),           // tristate
-                TagFilter(),             // tristate
-                SortFilter()             // single-select
-            )
+            SortFilter(getSortFilter().map { it.name }.toTypedArray()),
+            GenreGroupFilter(getGenreFilter()),
+            TagGroupFilter(getTagFilter()),
+            OriginGroupFilter(getSourceFilter())
         )
     }
 }

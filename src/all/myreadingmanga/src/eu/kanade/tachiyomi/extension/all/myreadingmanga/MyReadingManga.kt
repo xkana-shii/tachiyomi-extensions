@@ -284,7 +284,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         // create first chapter since its on main manga page
         chapters.add(createChapter("1", document.baseUri(), date, "Ch. 1"))
         // see if there are multiple chapters or not
-        val lastChapterNumber = document.select(chapterListSelector()).last()?.text()
+        val lastChapterNumber = document.select(chapterListSelector()).last()?.text()?.toIntOrNull()
         if (lastChapterNumber != null) {
             // There are entries with more chapters but those never show up,
             // so we take the last one and loop it to get all hidden ones.

@@ -162,9 +162,11 @@ class Kagane : HttpSource(), ConfigurableSource {
             }
         }
 
+        val sourcesValue = source?.takeIf { it.isNotEmpty() && it != "All" }
+
         val body = buildJsonObject {
-            if (source != null && source.isNotEmpty() && source != "All") {
-                put("sources", buildJsonArray { add(JsonPrimitive(source!!)) })
+            if (sourcesValue != null) {
+                put("sources", buildJsonArray { add(JsonPrimitive(sourcesValue)) })
             }
             if (includedGenres.isNotEmpty()) {
                 put(
@@ -203,13 +205,13 @@ class Kagane : HttpSource(), ConfigurableSource {
                 )
             }
         }.toJsonString().toRequestBody("application/json".toMediaType())
-
+        val sortValue = sort?.takeIf { it.isNotEmpty() && it != "Relevance" }
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
             addQueryParameter("mature", preferences.showNsfw.toString())
             addQueryParameter("size", "35")
             if (query.isNotBlank()) addQueryParameter("name", query)
-            if (sort != null && sort.isNotEmpty() && sort != "Relevance") addQueryParameter("sort", sort)
+            if (sortValue != null) addQueryParameter("sort", sortValue)
         }
         return POST(url.toString(), headers, body)
     }

@@ -201,7 +201,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                 is Filter.Select<*>,
                 is Filter.Separator,
                 is Filter.Text,
-                    -> {}
+                -> {}
                 else -> {}
             }
         }
@@ -521,7 +521,7 @@ class Kagane : HttpSource(), ConfigurableSource {
 
             Json { ignoreUnknownKeys = true }
                 .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             // Catch everything, log if needed, return null to prevent crash
             // e.printStackTrace()
             null
@@ -567,7 +567,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                 GenreFilter(genreList),
                 TagFilter(tagList),
             )
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             // Catch everything, show empty filter list to prevent crash
             // e.printStackTrace()
             FilterList(

@@ -485,7 +485,7 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // ============================= Filters ==============================
-    
+
     private fun fetchKaganeFiltersJson(): KaganeSsrMetadata? {
         val searchUrl = "$baseUrl/search"
         val req = GET(searchUrl, headers)

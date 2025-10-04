@@ -200,30 +200,46 @@ class Kagane : HttpSource(), ConfigurableSource {
                 is Filter.Header,
                 is Filter.Select<*>,
                 is Filter.Separator,
-                is Filter.Text -> {}
+                is Filter.Text,
+                    -> {}
                 else -> {}
             }
         }
 
         val body = buildJsonObject {
-            put("sources", buildJsonArray {
-                sources.forEach { add(JsonPrimitive(it)) }
-            })
+            put(
+                "sources",
+                buildJsonArray {
+                    sources.forEach { add(JsonPrimitive(it)) }
+                },
+            )
             if (tags.isNotEmpty()) {
-                put("inclusive_tags", buildJsonObject {
-                    put("values", buildJsonArray {
-                        tags.forEach { add(JsonPrimitive(it)) }
-                    })
-                    put("match_all", true)
-                })
+                put(
+                    "inclusive_tags",
+                    buildJsonObject {
+                        put(
+                            "values",
+                            buildJsonArray {
+                                tags.forEach { add(JsonPrimitive(it)) }
+                            },
+                        )
+                        put("match_all", true)
+                    },
+                )
             }
             if (genres.isNotEmpty()) {
-                put("inclusive_genres", buildJsonObject {
-                    put("values", buildJsonArray {
-                        genres.forEach { add(JsonPrimitive(it)) }
-                    })
-                    put("match_all", true)
-                })
+                put(
+                    "inclusive_genres",
+                    buildJsonObject {
+                        put(
+                            "values",
+                            buildJsonArray {
+                                genres.forEach { add(JsonPrimitive(it)) }
+                            },
+                        )
+                        put("match_all", true)
+                    },
+                )
             }
         }.toJsonString().toRequestBody("application/json".toMediaType())
 
@@ -522,11 +538,11 @@ class Kagane : HttpSource(), ConfigurableSource {
     ) : Filter.Sort(
         "Sort By",
         arrayOf(
-            "Relevance",        // index 0 (no sort param)
-            "Latest",           // index 1
-            "By Name",          // index 2
-            "Books count",      // index 3
-            "Created at",       // index 4
+            "Relevance", // index 0 (no sort param)
+            "Latest", // index 1
+            "By Name", // index 2
+            "Books count", // index 3
+            "Created at", // index 4
         ),
         Selection(state, ascending),
     )

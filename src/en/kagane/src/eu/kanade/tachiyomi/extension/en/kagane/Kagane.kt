@@ -201,7 +201,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                 is Filter.Select<*>,
                 is Filter.Separator,
                 is Filter.Text,
-                -> {}
+                    -> {}
                 else -> {}
             }
         }

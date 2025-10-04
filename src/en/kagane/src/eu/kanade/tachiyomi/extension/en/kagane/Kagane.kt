@@ -503,20 +503,27 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================= Filters ==============================
 
     private fun fetchKaganeFiltersJson(): KaganeSsrMetadata? {
-        val searchUrl = "$baseUrl/search"
-        val req = GET(searchUrl, headers)
-        val resp = client.newCall(req).execute()
-        val body = resp.body?.string() ?: return null
-
-        // Try to extract the SSR metadata JSON
-        val regex = Regex("\"ssrMetadata\":(\\{.*?\\})[,}]")
-        val match = regex.find(body)
-        val metadataJson = match?.groups?.get(1)?.value ?: return null
-
         return try {
+            val searchUrl = "$baseUrl/search"
+            val req = GET(searchUrl, headers)
+            val resp = client.newCall(req).execute()
+            val body = resp.body?.string() ?: return null
+
+            // Try to extract the SSR metadata JSON robustly
+            val regex = Regex("\"ssrMetadata\"\\s*:\\s*(\\{.*?\\})[,}\\]]?", RegexOption.DOT_MATCHES_ALL)
+            val match = regex.find(body)
+            val metadataJson = match?.groups?.get(1)?.value
+            if (metadataJson == null) {
+                // Could not find ssrMetadata in /search page!
+                return null
+            }
+            // println("Extracted ssrMetadata: $metadataJson")
+
             Json { ignoreUnknownKeys = true }
                 .decodeFromString(KaganeSsrMetadata.serializer(), metadataJson)
-        } catch (_: Exception) {
+        } catch (e: Throwable) {
+            // Catch everything, log if needed, return null to prevent crash
+            // e.printStackTrace()
             null
         }
     }
@@ -547,16 +554,28 @@ class Kagane : HttpSource(), ConfigurableSource {
         Selection(state, ascending),
     )
 
+    // Now catch everything in getFilterList to prevent crashes and always return a safe filter list
     override fun getFilterList(): FilterList {
-        val meta = fetchKaganeFiltersJson()
-        val sourceList = meta?.sources ?: emptyList()
-        val genreList = meta?.genres?.keys?.toList() ?: emptyList()
-        val tagList = meta?.tags?.keys?.toList() ?: emptyList()
-        return FilterList(
-            SortFilter(),
-            SourceFilter(sourceList),
-            GenreFilter(genreList),
-            TagFilter(tagList),
-        )
+        return try {
+            val meta = fetchKaganeFiltersJson()
+            val sourceList = meta?.sources ?: emptyList()
+            val genreList = meta?.genres?.keys?.toList() ?: emptyList()
+            val tagList = meta?.tags?.keys?.toList() ?: emptyList()
+            FilterList(
+                SortFilter(),
+                SourceFilter(sourceList),
+                GenreFilter(genreList),
+                TagFilter(tagList),
+            )
+        } catch (e: Throwable) {
+            // Catch everything, show empty filter list to prevent crash
+            // e.printStackTrace()
+            FilterList(
+                SortFilter(),
+                SourceFilter(emptyList()),
+                GenreFilter(emptyList()),
+                TagFilter(emptyList()),
+            )
+        }
     }
 }

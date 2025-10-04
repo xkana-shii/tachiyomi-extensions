@@ -128,7 +128,7 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter())))
+        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter().map { it.name }.toTypedArray())))
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
@@ -147,7 +147,13 @@ class Kagane : HttpSource(), ConfigurableSource {
                     source = filter.selected.firstOrNull()
                 }
                 is SortFilter -> {
-                    sort = filter.selected
+                    if (filter.state != null) {
+                        val sort = getSortFilter()[filter.state!!.index].value
+                        val value = when (filter.state!!.ascending) {
+                            true -> "az"
+                            false -> "za"
+                        }
+                    }
                 }
                 is GenreGroupFilter -> {
                     includedGenres.addAll(filter.included)
@@ -429,12 +435,10 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================= Filters ==============================
 
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            SortFilter(getSortFilter()),
-            GenreGroupFilter(getGenreFilter()),
-            TagGroupFilter(getTagFilter()),
-            SourceFilter(getSourceFilter()),
-        )
-    }
+    override fun getFilterList() = FilterList(
+        SortFilter(getSortFilter().map { it.name }.toTypedArray()),
+        SourceFilter(getSourceFilter()),
+        GenreGroupFilter(getGenreFilter()),
+        TagGroupFilter(getTagFilter()),
+    )
 }

@@ -6,10 +6,7 @@ class SelectFilterOption(val name: String, val value: String)
 class CheckboxFilterOption(val value: String, name: String, default: Boolean = false) : Filter.CheckBox(name, default)
 class TriStateFilterOption(val value: String, name: String, default: Int = 0) : Filter.TriState(name, default)
 
-abstract class SelectFilter(name: String, private val options: List<SelectFilterOption>, default: Int = 0) : Filter.Select<String>(name, options.map { it.name }.toTypedArray(), default) {
-    val selected: String
-        get() = options[state].value
-}
+class SortFilter(sortables: Array<String>) : Filter.Sort("Sort", sortables, Selection(5, false))
 
 abstract class CheckboxGroupFilter(name: String, options: List<CheckboxFilterOption>) : Filter.Group<CheckboxFilterOption>(name, options) {
     val selected: List<String>
@@ -22,8 +19,6 @@ abstract class TriStateGroupFilter(name: String, options: List<TriStateFilterOpt
     val excluded: List<String>
         get() = state.filter { it.isExcluded() }.map { it.value }
 }
-
-class SortFilter(options: List<SelectFilterOption>, default: Int = 0) : SelectFilter("Sort", options, default)
 
 class SourceFilter(options: List<CheckboxFilterOption>) : CheckboxGroupFilter("Source", options)
 class GenreGroupFilter(options: List<TriStateFilterOption>) : TriStateGroupFilter("Genre", options)

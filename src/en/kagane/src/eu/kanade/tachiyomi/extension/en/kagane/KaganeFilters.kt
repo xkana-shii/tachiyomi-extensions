@@ -23,9 +23,9 @@ abstract class TriStateGroupFilter(name: String, options: List<TriStateFilterOpt
         get() = state.filter { it.isExcluded() }.map { it.value }
 }
 
-class SortFilter(sortables: Array<String>) : Filter.Sort("Sort", sortables, Selection(5, false))
-class SourceFilter(options: List<SelectFilterOption>, default: Int) : SelectFilter("Source", options, default)
-class OriginGroupFilter(options: List<CheckboxFilterOption>) : CheckboxGroupFilter("Origin", options)
+class SortFilter(options: List<SelectFilterOption>, default: Int = 0) : SelectFilter("Sort", options, default)
+
+class SourceFilter(options: List<CheckboxFilterOption>) : CheckboxGroupFilter("Source", options)
 class GenreGroupFilter(options: List<TriStateFilterOption>) : TriStateGroupFilter("Genre", options)
 class TagGroupFilter(options: List<TriStateFilterOption>) : TriStateGroupFilter("Tag", options)
 

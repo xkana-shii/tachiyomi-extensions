@@ -130,7 +130,7 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // =============================== Latest ===============================
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter().map { it.name }.toTypedArray())))
+        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter())))
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
@@ -145,8 +145,8 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         filters.forEach { filter ->
             when (filter) {
-                is OriginGroupFilter -> {
-                    source = filter.selected.firstOrNull() // Source is checkboxes; use first selected (or join if API supports multiple)
+                is SourceFilter -> {
+                    source = filter.selected.firstOrNull()
                 }
                 is SortFilter -> {
                     sort = filter.selected
@@ -158,6 +158,8 @@ class Kagane : HttpSource(), ConfigurableSource {
                 is TagGroupFilter -> {
                     includedTags.addAll(filter.included)
                     excludedTags.addAll(filter.excluded)
+                }
+                else -> {
                 }
             }
         }
@@ -430,10 +432,10 @@ class Kagane : HttpSource(), ConfigurableSource {
     // Only genre and tag are tristate; source and sort are single-select.
     override fun getFilterList(): FilterList {
         return FilterList(
-            SortFilter(getSortFilter().map { it.name }.toTypedArray()),
+            SortFilter(getSortFilter()),
             GenreGroupFilter(getGenreFilter()),
             TagGroupFilter(getTagFilter()),
-            OriginGroupFilter(getSourceFilter())
+            SourceFilter(getSourceFilter())
         )
     }
 }

@@ -20,7 +20,6 @@ class SearchDto(
         val name: String,
         val id: String,
     ) {
-
         fun toSManga(domain: String): SManga = SManga.create().apply {
             title = name
             url = id
@@ -101,3 +100,20 @@ class ChallengeDto(
     @SerialName("access_token")
     val accessToken: String,
 )
+
+// --- DYNAMIC FILTER METADATA DTOS ---
+@Serializable
+data class KaganeMetadata(
+    val sources: List<KaganeSourceMeta>,
+    val genres: List<KaganeGenreMeta>,
+    val tags: List<KaganeTagMeta>,
+)
+
+@Serializable
+data class KaganeSourceMeta(val name: String, val count: Int)
+
+@Serializable
+data class KaganeGenreMeta(val name: String, val count: Int)
+
+@Serializable
+data class KaganeTagMeta(val name: String, val count: Int)

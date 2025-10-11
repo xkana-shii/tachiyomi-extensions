@@ -138,15 +138,15 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================== Popular ===============================
 
-    override fun popularMangaRequest(page: Int): Request =
-        GET("$baseUrl/series/popular?tf=all&page=$page", headers)
+    override fun popularMangaRequest(page: Int) =
+        searchMangaRequest(page, "", getFilterList().apply { /* default to sort=Latest for popular/latest */ })
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
 
-    override fun latestUpdatesRequest(page: Int): Request =
-        GET("$baseUrl/series/recently-updated?page=$page", headers)
+    override fun latestUpdatesRequest(page: Int) =
+        searchMangaRequest(page, "", getFilterList().apply { /* default to sort=Latest for popular/latest */ })
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 

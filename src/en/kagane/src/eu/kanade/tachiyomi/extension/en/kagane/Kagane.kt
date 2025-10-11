@@ -139,14 +139,14 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================== Popular ===============================
 
     override fun popularMangaRequest(page: Int) =
-        searchMangaRequest(page, "", getFilterList().apply { /* default to sort=Latest for popular/latest */ })
+        searchMangaRequest(page, "", FilterList(SortFilter(1)))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", getFilterList().apply { /* default to sort=Latest for popular/latest */ })
+        searchMangaRequest(page, "", FilterList(SortFilter(2)))
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
@@ -160,23 +160,19 @@ class Kagane : HttpSource(), ConfigurableSource {
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
             addQueryParameter("mature", preferences.showNsfw.toString())
-            addQueryParameter("size", "35")
+            addQueryParameter("size", 35.toString()) // Default items per request
             if (query.isNotBlank()) {
                 addQueryParameter("name", query)
             }
             filters.forEach { filter ->
                 when (filter) {
-                    is SortFilter -> addQueryParameter("sort", filter.selected)
-                    is SourceGroupFilter -> filter.selected.forEach { addQueryParameter("source", it) }
-                    is GenreGroupFilter -> {
-                        filter.included.forEach { addQueryParameter("genre_include", it) }
-                        filter.excluded.forEach { addQueryParameter("genre_exclude", it) }
+                    is SortFilter -> {
+                        filter.selected?.let {
+                            addQueryParameter("sort", filter.toUriPart())
+                        }
                     }
-                    is TagGroupFilter -> {
-                        filter.included.forEach { addQueryParameter("tag_include", it) }
-                        filter.excluded.forEach { addQueryParameter("tag_exclude", it) }
-                    }
-                    else -> { /* ignore other filter types */ }
+
+                    else -> {}
                 }
             }
         }
@@ -441,77 +437,33 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================= Filters ==============================
 
-    // Metadata cache for session
-    private var cachedMetadata: MetadataDto? = null
-
-    // Fetch and cache metadata from API
-    private fun fetchMetadata(): MetadataDto {
-        cachedMetadata?.let { return it }
-        val response = client.newCall(GET("$apiUrl/api/v1/metadata", apiHeaders)).execute()
-        val metadata = response.parseAs<MetadataDto>()
-        cachedMetadata = metadata
-        return metadata
-    }
-
-    // --- FILTER OPTION CLASSES ---
-    // Single select filter option
-    class SelectFilterOption(val name: String, val value: String)
-
-    // Checkbox filter option for group
-    class CheckboxFilterOption(val value: String, name: String, default: Boolean = false) : Filter.CheckBox(name, default)
-
-    // Tri-state filter option for group
-    class TriStateFilterOption(val value: String, name: String, default: Int = 0) : Filter.TriState(name, default)
-
-    // --- FILTER GROUPS ---
-    // Select filter (single select)
-    class SortFilter(options: List<SelectFilterOption>, default: Int = 0) :
-        Filter.Select<String>("Sort By", options.map { it.name }.toTypedArray(), default) {
-        val optionList = options
-        val selected: String
-            get() = optionList[state].value
-    }
-
-    // Checkbox group filter (multi-select)
-    class SourceGroupFilter(options: List<CheckboxFilterOption>) :
-        Filter.Group<CheckboxFilterOption>("Source", options) {
-        val selected: List<String>
-            get() = state.filter { it.state }.map { it.value }
-    }
-
-    // Tri-state group filter (multi-select, include/exclude/ignore)
-    class GenreGroupFilter(options: List<TriStateFilterOption>) :
-        Filter.Group<TriStateFilterOption>("Genres", options) {
-        val included: List<String>
-            get() = state.filter { it.isIncluded() }.map { it.value }
-        val excluded: List<String>
-            get() = state.filter { it.isExcluded() }.map { it.value }
-    }
-
-    class TagGroupFilter(options: List<TriStateFilterOption>) :
-        Filter.Group<TriStateFilterOption>("Tags", options) {
-        val included: List<String>
-            get() = state.filter { it.isIncluded() }.map { it.value }
-        val excluded: List<String>
-            get() = state.filter { it.isExcluded() }.map { it.value }
-    }
-
-    // Sort options helper
-    private fun getSortOptions() = listOf(
-        SelectFilterOption("Relevance", ""),
-        SelectFilterOption("Latest", "updated_at"),
-        SelectFilterOption("By Name", "series_name"),
-        SelectFilterOption("Books count", "books_count"),
-        SelectFilterOption("Created at", "created_at"),
+    override fun getFilterList() = FilterList(
+        SortFilter(),
     )
 
-    override fun getFilterList(): FilterList {
-        val metadata = fetchMetadata()
-        return FilterList(
-            SortFilter(getSortOptions()),
-            SourceGroupFilter(metadata.sources.map { CheckboxFilterOption(it.name, it.name) }),
-            GenreGroupFilter(metadata.genres.map { TriStateFilterOption(it.name, it.name) }),
-            TagGroupFilter(metadata.tags.map { TriStateFilterOption(it.name, it.name) }),
-        )
+    class SortFilter(state: Int = 0) : UriPartFilter(
+        "Sort By",
+        arrayOf(
+            Pair("Relevance", ""),
+            Pair("Popular", "avg_views,desc"),
+            Pair("Latest", "updated_at"),
+            Pair("Latest Descending", "updated_at,desc"),
+            Pair("By Name", "series_name"),
+            Pair("By Name Descending", "series_name,desc"),
+            Pair("Books count", "books_count"),
+            Pair("Books count Descending", "books_count,desc"),
+            Pair("Created at", "created_at"),
+            Pair("Created at Descending", "created_at,desc"),
+        ),
+        state,
+    )
+
+    open class UriPartFilter(
+        displayName: String,
+        private val vals: Array<Pair<String, String>>,
+        state: Int = 0,
+    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
+        fun toUriPart() = vals[state].second
+        val selected get() = vals[state].second.takeUnless { it.isEmpty() }
     }
 }

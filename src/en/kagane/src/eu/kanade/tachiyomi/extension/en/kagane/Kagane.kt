@@ -506,11 +506,31 @@ class Kagane : HttpSource(), ConfigurableSource {
         return try {
             val response = client.newCall(GET(url, headers)).execute()
             val body = response.body?.string() ?: return null
-            // Try to extract the JSON object containing metadata from the RSC payload
-            val metaRegex = Regex("\"metadata\":(\\{.*?\\}\\]),\"error\"")
-            val match = metaRegex.find(body)
-            val jsonText = match?.groups?.get(1)?.value
-            jsonText?.let { Json.decodeFromString(KaganeMetadata.serializer(), it) }
+
+            // --- Updated metadata parsing ---
+            // Find "metadata":{...}
+            val metaStart = body.indexOf("\"metadata\":{")
+            if (metaStart == -1) return null
+
+            // Find the opening '{' and match braces to find the closing '}'
+            val openBraceIdx = body.indexOf('{', metaStart)
+            var braceCount = 1
+            var i = openBraceIdx + 1
+            while (i < body.length && braceCount > 0) {
+                when (body[i]) {
+                    '{' -> braceCount++
+                    '}' -> braceCount--
+                }
+                i++
+            }
+            if (braceCount != 0) return null
+            val metadataJson = body.substring(openBraceIdx, i)
+
+            // --- Debug print (optional) ---
+            // println("Extracted metadata JSON: $metadataJson")
+
+            // Parse it using kotlinx.serialization
+            Json.decodeFromString(KaganeMetadata.serializer(), metadataJson)
         } catch (_: Exception) {
             null
         }

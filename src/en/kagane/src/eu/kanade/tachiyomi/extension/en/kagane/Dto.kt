@@ -20,6 +20,7 @@ class SearchDto(
         val name: String,
         val id: String,
     ) {
+
         fun toSManga(domain: String): SManga = SManga.create().apply {
             title = name
             url = id
@@ -83,10 +84,11 @@ class ChapterDto(
         @SerialName("pages_count")
         val pagesCount: Int,
     ) {
-        fun toSChapter(): SChapter = SChapter.create().apply {
+        fun toSChapter(index: Int): SChapter = SChapter.create().apply {
             url = "$seriesId;$id;$pagesCount"
             name = title
             date_upload = dateFormat.tryParse(releaseDate)
+            chapter_number = index.toFloat()
         }
     }
 
@@ -101,19 +103,16 @@ class ChallengeDto(
     val accessToken: String,
 )
 
-// --- DYNAMIC FILTER METADATA DTOS ---
+// Metadata DTOs for sources, genres, and tags
 @Serializable
-data class KaganeMetadata(
-    val sources: List<KaganeSourceMeta>,
-    val genres: List<KaganeGenreMeta>,
-    val tags: List<KaganeTagMeta>,
+data class MetadataDto(
+    val sources: List<MetadataItem>,
+    val genres: List<MetadataItem>,
+    val tags: List<MetadataItem>,
 )
 
 @Serializable
-data class KaganeSourceMeta(val name: String, val count: Int)
-
-@Serializable
-data class KaganeGenreMeta(val name: String, val count: Int)
-
-@Serializable
-data class KaganeTagMeta(val name: String, val count: Int)
+data class MetadataItem(
+    val name: String,
+    val count: Int,
+)

@@ -456,8 +456,10 @@ class Kagane : HttpSource(), ConfigurableSource {
     // --- FILTER OPTION CLASSES ---
     // Single select filter option
     class SelectFilterOption(val name: String, val value: String)
+
     // Checkbox filter option for group
     class CheckboxFilterOption(val value: String, name: String, default: Boolean = false) : Filter.CheckBox(name, default)
+
     // Tri-state filter option for group
     class TriStateFilterOption(val value: String, name: String, default: Int = 0) : Filter.TriState(name, default)
 

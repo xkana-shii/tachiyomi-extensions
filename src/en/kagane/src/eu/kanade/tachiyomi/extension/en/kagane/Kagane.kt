@@ -139,14 +139,22 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================== Popular ===============================
 
     override fun popularMangaRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(1)))
+        searchMangaRequest(
+            page,
+            "",
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(1, false))),
+        )
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(2)))
+        searchMangaRequest(
+            page,
+            "",
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(2, false))),
+        )
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
@@ -167,8 +175,9 @@ class Kagane : HttpSource(), ConfigurableSource {
             filters.forEach { filter ->
                 when (filter) {
                     is SortFilter -> {
-                        filter.selected?.let {
-                            addQueryParameter("sort", filter.toUriPart())
+                        val uriPart = filter.toUriPart()
+                        if (uriPart.isNotEmpty()) {
+                            addQueryParameter("sort", uriPart)
                         }
                     }
 
@@ -438,32 +447,35 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================= Filters ==============================
 
     override fun getFilterList() = FilterList(
-        SortFilter(),
+        SortFilter(getSortFilter()),
     )
 
-    class SortFilter(state: Int = 0) : UriPartFilter(
+    class SelectFilterOption(val name: String, val value: String)
+
+    class SortFilter(
+        private val options: List<SelectFilterOption>,
+        selection: Filter.Sort.Selection = Filter.Sort.Selection(0, false),
+    ) : Filter.Sort(
         "Sort By",
-        arrayOf(
-            Pair("Relevance", ""),
-            Pair("Popular", "avg_views,desc"),
-            Pair("Latest", "updated_at"),
-            Pair("Latest Descending", "updated_at,desc"),
-            Pair("By Name", "series_name"),
-            Pair("By Name Descending", "series_name,desc"),
-            Pair("Books count", "books_count"),
-            Pair("Books count Descending", "books_count,desc"),
-            Pair("Created at", "created_at"),
-            Pair("Created at Descending", "created_at,desc"),
-        ),
-        state,
-    )
+        options.map { it.name }.toTypedArray(),
+        selection,
+    ) {
+        val selected: SelectFilterOption
+            get() = options[state!!.index]
 
-    open class UriPartFilter(
-        displayName: String,
-        private val vals: Array<Pair<String, String>>,
-        state: Int = 0,
-    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
-        fun toUriPart() = vals[state].second
-        val selected get() = vals[state].second.takeUnless { it.isEmpty() }
+        fun toUriPart(): String {
+            val base = selected.value
+            val order = if (state!!.ascending) "" else ",desc"
+            return if (base.isNotEmpty()) base + order else ""
+        }
     }
+
+    private fun getSortFilter() = listOf(
+        SelectFilterOption("Relevance", ""),
+        SelectFilterOption("Popular", "avg_views"),
+        SelectFilterOption("Latest", "updated_at"),
+        SelectFilterOption("By Name", "series_name"),
+        SelectFilterOption("Books count", "books_count"),
+        SelectFilterOption("Created at", "created_at"),
+    )
 }

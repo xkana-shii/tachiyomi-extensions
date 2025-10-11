@@ -103,7 +103,6 @@ class ChallengeDto(
     val accessToken: String,
 )
 
-// Metadata DTOs for sources, genres, and tags
 @Serializable
 data class MetadataDto(
     val sources: List<MetadataItem>,

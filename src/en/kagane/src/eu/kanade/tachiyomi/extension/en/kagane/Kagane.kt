@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -16,6 +17,7 @@ import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -25,8 +27,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Cookie
@@ -51,10 +51,13 @@ import java.util.concurrent.TimeUnit
 class Kagane : HttpSource(), ConfigurableSource {
 
     override val name = "Kagane"
+
     private val domain = "kagane.org"
     private val apiUrl = "https://api.$domain"
     override val baseUrl = "https://$domain"
+
     override val lang = "en"
+
     override val supportsLatest = true
 
     private val preferences by getPreferencesLazy()
@@ -63,14 +66,17 @@ class Kagane : HttpSource(), ConfigurableSource {
         .cookieJar(
             object : CookieJar {
                 private val cookieManager by lazy { CookieManager.getInstance() }
+
                 override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
                     val urlString = url.toString()
                     cookies.forEach { cookieManager.setCookie(urlString, it.toString()) }
                 }
+
                 override fun loadForRequest(url: HttpUrl): List<Cookie> {
                     val cookies = cookieManager.getCookie(url.toString()).orEmpty()
                     val cookieList = mutableListOf<Cookie>()
                     var hasNsfwCookie = false
+
                     cookies.split(";").mapNotNullTo(cookieList) { c ->
                         var cookieValue = c
                         if (url.host == domain && c.contains("kagane_mature_content")) {
@@ -78,11 +84,16 @@ class Kagane : HttpSource(), ConfigurableSource {
                             val (key, _) = c.split("=")
                             cookieValue = "$key=${preferences.showNsfw}"
                         }
+
                         Cookie.parse(url, cookieValue)
                     }
+
                     if (!hasNsfwCookie && url.host == domain) {
-                        Cookie.parse(url, "kagane_mature_content=${preferences.showNsfw}")?.let { cookieList.add(it) }
+                        Cookie.parse(url, "kagane_mature_content=${preferences.showNsfw}")?.let {
+                            cookieList.add(it)
+                        }
                     }
+
                     return cookieList
                 }
             },
@@ -98,8 +109,10 @@ class Kagane : HttpSource(), ConfigurableSource {
         if (!url.queryParameterNames.contains("token")) {
             return chain.proceed(request)
         }
+
         val seriesId = url.pathSegments[3]
         val chapterId = url.pathSegments[5]
+
         var response = chain.proceed(
             request.newBuilder()
                 .url(url.newBuilder().setQueryParameter("token", accessToken).build())
@@ -119,106 +132,49 @@ class Kagane : HttpSource(), ConfigurableSource {
                     .build(),
             )
         }
+
         return response
     }
 
     // ============================== Popular ===============================
-    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList())
+
+    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter(0)))
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
+
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(getSortFilter().map { it.name }.toTypedArray())))
+        searchMangaRequest(page, "", FilterList(SortFilter(2)))
+
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
+
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        // ----------- FILTER EXTRACTION LOGIC -----------
-        var source: String? = null
-        var sort: String? = null
-        val includedGenres = mutableListOf<String>()
-        val excludedGenres = mutableListOf<String>()
-        val includedTags = mutableListOf<String>()
-        val excludedTags = mutableListOf<String>()
+        val body = buildJsonObject { }
+            .toJsonString()
+            .toRequestBody("application/json".toMediaType())
 
-        filters.forEach { filter ->
-            when (filter) {
-                is SourceFilter -> {
-                    source = filter.selected.firstOrNull()
-                }
-                is SortFilter -> {
-                    if (filter.state != null) {
-                        val sort = getSortFilter()[filter.state!!.index].value
-                        val value = when (filter.state!!.ascending) {
-                            true -> "az"
-                            false -> "za"
-                        }
-                    }
-                }
-                is GenreGroupFilter -> {
-                    includedGenres.addAll(filter.included)
-                    excludedGenres.addAll(filter.excluded)
-                }
-                is TagGroupFilter -> {
-                    includedTags.addAll(filter.included)
-                    excludedTags.addAll(filter.excluded)
-                }
-                else -> {
-                }
-            }
-        }
-
-        val sourcesValue = source?.takeIf { it.isNotEmpty() && it != "All" }
-
-        val body = buildJsonObject {
-            if (sourcesValue != null) {
-                put("sources", buildJsonArray { add(JsonPrimitive(sourcesValue)) })
-            }
-            if (includedGenres.isNotEmpty()) {
-                put(
-                    "inclusive_genres",
-                    buildJsonObject {
-                        put("values", buildJsonArray { includedGenres.forEach { add(JsonPrimitive(it)) } })
-                        put("match_all", true)
-                    },
-                )
-            }
-            if (excludedGenres.isNotEmpty()) {
-                put(
-                    "exclusive_genres",
-                    buildJsonObject {
-                        put("values", buildJsonArray { excludedGenres.forEach { add(JsonPrimitive(it)) } })
-                        put("match_all", true)
-                    },
-                )
-            }
-            if (includedTags.isNotEmpty()) {
-                put(
-                    "inclusive_tags",
-                    buildJsonObject {
-                        put("values", buildJsonArray { includedTags.forEach { add(JsonPrimitive(it)) } })
-                        put("match_all", true)
-                    },
-                )
-            }
-            if (excludedTags.isNotEmpty()) {
-                put(
-                    "exclusive_tags",
-                    buildJsonObject {
-                        put("values", buildJsonArray { excludedTags.forEach { add(JsonPrimitive(it)) } })
-                        put("match_all", true)
-                    },
-                )
-            }
-        }.toJsonString().toRequestBody("application/json".toMediaType())
-        val sortValue = sort?.takeIf { it.isNotEmpty() && it != "Relevance" }
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
             addQueryParameter("mature", preferences.showNsfw.toString())
-            addQueryParameter("size", "35")
-            if (query.isNotBlank()) addQueryParameter("name", query)
-            if (sortValue != null) addQueryParameter("sort", sortValue)
+            addQueryParameter("size", 35.toString()) // Default items per request
+            if (query.isNotBlank()) {
+                addQueryParameter("name", query)
+            }
+            filters.forEach { filter ->
+                when (filter) {
+                    is SortFilter -> {
+                        filter.selected?.let {
+                            addQueryParameter("sort", filter.toUriPart())
+                        }
+                    }
+
+                    else -> {}
+                }
+            }
         }
+
         return POST(url.toString(), headers, body)
     }
 
@@ -229,19 +185,25 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // =========================== Manga Details ============================
+
     override fun mangaDetailsParse(response: Response): SManga {
         val dto = response.parseAs<DetailsDto>()
-        return dto.data.toSManga()
+        return dto.toSManga()
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request {
         return GET("$apiUrl/api/v1/series/${manga.url}", apiHeaders)
     }
 
+    override fun getMangaUrl(manga: SManga): String {
+        return "$baseUrl/series/${manga.url}"
+    }
+
     // ============================== Chapters ==============================
+
     override fun chapterListParse(response: Response): List<SChapter> {
         val dto = response.parseAs<ChapterDto>()
-        return dto.data.content.map { it.toSChapter() }.reversed()
+        return dto.content.map { it.toSChapter() }.reversed()
     }
 
     override fun chapterListRequest(manga: SManga): Request {
@@ -249,6 +211,7 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     // =============================== Pages ================================
+
     private val apiHeaders = headers.newBuilder().apply {
         add("Origin", baseUrl)
         add("Referer", "$baseUrl/")
@@ -261,11 +224,16 @@ class Kagane : HttpSource(), ConfigurableSource {
     }
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
-        val (seriesId, chapterId) = chapter.url.split(";")
+        if (chapter.url.count { it == ';' } != 2) throw Exception("Chapter url error, please refresh chapter list.")
+        var (seriesId, chapterId, pageCount) = chapter.url.split(";")
+
         val challengeResp = getChallengeResponse(seriesId, chapterId)
         accessToken = challengeResp.accessToken
-        val pageCount = getPageCountResponse(seriesId, chapterId)
-        val pages = (0 until pageCount).map { page ->
+        if (preferences.dataSaver) {
+            chapterId = chapterId + "_ds"
+        }
+
+        val pages = (0 until pageCount.toInt()).map { page ->
             val pageUrl = "$apiUrl/api/v1/books".toHttpUrl().newBuilder().apply {
                 addPathSegment(seriesId)
                 addPathSegment("file")
@@ -273,14 +241,17 @@ class Kagane : HttpSource(), ConfigurableSource {
                 addPathSegment((page + 1).toString())
                 addQueryParameter("token", accessToken)
             }.build().toString()
+
             Page(page, imageUrl = pageUrl)
         }
+
         return Observable.just(pages)
     }
 
     private var accessToken: String = ""
     private fun getChallengeResponse(seriesId: String, chapterId: String): ChallengeDto {
         val f = "$seriesId:$chapterId".sha256().sliceArray(0 until 16)
+
         val interfaceName = "jsInterface"
         val html = """
             <!DOCTYPE html>
@@ -299,6 +270,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                         }
                         return bytes.buffer;
                     }
+
                     async function getData() {
                         const g = base64ToArrayBuffer("${getCertificate()}");
                         let t = await navigator.requestMediaKeySystemAccess("com.widevine.alpha", [{
@@ -308,6 +280,7 @@ class Kagane : HttpSource(), ConfigurableSource {
                             contentType: 'video/mp4; codecs="avc1.42E01E"'
                           }]
                         }]);
+
                         let e = await t.createMediaKeys();
                         await e.setServerCertificate(g);
                         let n = e.createSession();
@@ -316,13 +289,16 @@ class Kagane : HttpSource(), ConfigurableSource {
                             n.removeEventListener("message", onMessage);
                             resolve(event.message);
                           }
+
                           function onError() {
                             n.removeEventListener("error", onError);
                             reject(new Error("Failed to generate license challenge"));
                           }
+
                           n.addEventListener("message", onMessage);
                           n.addEventListener("error", onError);
                         });
+
                         await n.generateRequest("cenc", base64ToArrayBuffer("${getPssh(f).toBase64()}"));
                         let o = await i;
                         let m = new Uint8Array(o);
@@ -342,6 +318,7 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         handler.post {
             val innerWv = WebView(Injekt.get<Application>())
+
             webView = innerWv
             innerWv.settings.domStorageEnabled = true
             innerWv.settings.javaScriptEnabled = true
@@ -349,6 +326,7 @@ class Kagane : HttpSource(), ConfigurableSource {
             innerWv.settings.userAgentString = headers["User-Agent"]
             innerWv.setLayerType(View.LAYER_TYPE_SOFTWARE, null)
             innerWv.addJavascriptInterface(jsInterface, interfaceName)
+
             innerWv.webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest?) {
                     if (request?.resources?.contains(PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID) == true) {
@@ -358,42 +336,49 @@ class Kagane : HttpSource(), ConfigurableSource {
                     }
                 }
             }
+
             innerWv.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
         }
 
         latch.await(10, TimeUnit.SECONDS)
         handler.post { webView?.destroy() }
 
-        if (latch.count == 1L) throw Exception("Timed out getting drm challenge")
-        if (jsInterface.challenge.isEmpty()) throw Exception("Failed to get drm challenge")
+        if (latch.count == 1L) {
+            throw Exception("Timed out getting drm challenge")
+        }
 
-        val challengeUrl = "$apiUrl/api/v1/books/$seriesId/file/$chapterId"
+        if (jsInterface.challenge.isEmpty()) {
+            throw Exception("Failed to get drm challenge")
+        }
+
+        val challengeUrl = "$apiUrl/api/v1/books/$seriesId/file/$chapterId".toHttpUrl().newBuilder().apply {
+            if (preferences.dataSaver) {
+                addQueryParameter("datasaver", true.toString())
+            }
+        }.build()
         val challengeBody = buildJsonObject {
             put("challenge", jsInterface.challenge)
         }.toJsonString().toRequestBody("application/json".toMediaType())
 
-        return client.newCall(POST(challengeUrl, apiHeaders, challengeBody)).execute()
+        return client.newCall(POST(challengeUrl.toString(), apiHeaders, challengeBody)).execute()
             .parseAs<ChallengeDto>()
-    }
-
-    private fun getPageCountResponse(seriesId: String, chapterId: String): Int {
-        val challengeUrl = "$apiUrl/api/v1/books/$seriesId/metadata/$chapterId"
-        val dto = client.newCall(GET(challengeUrl, apiHeaders)).execute()
-            .parseAs<PagesCountDto>()
-        return dto.data.media.pagesCount
     }
 
     private fun concat(vararg arrays: ByteArray): ByteArray =
         arrays.reduce { acc, bytes -> acc + bytes }
 
     private fun getPssh(t: ByteArray): ByteArray {
-        val e = android.util.Base64.decode("7e+LqXnWSs6jyCfc1R0h7Q==", android.util.Base64.DEFAULT)
+        val e = Base64.decode("7e+LqXnWSs6jyCfc1R0h7Q==", Base64.DEFAULT)
         val zeroes = ByteArray(4)
+
         val i = byteArrayOf(18, t.size.toByte()) + t
         val s = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(i.size).array()
+
         val innerBox = concat(zeroes, e, s, i)
-        val outerSize = ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(innerBox.size + 8).array()
+        val outerSize =
+            ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(innerBox.size + 8).array()
         val psshHeader = "pssh".toByteArray(StandardCharsets.UTF_8)
+
         return concat(outerSize, psshHeader, innerBox)
     }
 
@@ -415,30 +400,66 @@ class Kagane : HttpSource(), ConfigurableSource {
     override fun pageListParse(response: Response): List<Page> {
         throw UnsupportedOperationException()
     }
+
     override fun imageUrlParse(response: Response): String {
         throw UnsupportedOperationException()
     }
 
     // ============================ Preferences =============================
+
     private val SharedPreferences.showNsfw
         get() = this.getBoolean(SHOW_NSFW_KEY, true)
+    private val SharedPreferences.dataSaver
+        get() = this.getBoolean(DATA_SAVER, false)
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
             key = SHOW_NSFW_KEY
             title = "Show nsfw entries"
             setDefaultValue(true)
         }.let(screen::addPreference)
+        SwitchPreferenceCompat(screen.context).apply {
+            key = DATA_SAVER
+            title = "Data saver"
+            setDefaultValue(false)
+        }.let(screen::addPreference)
     }
+
+    // ============================= Utilities ==============================
+
     companion object {
         private const val SHOW_NSFW_KEY = "pref_show_nsfw"
+        private const val DATA_SAVER = "data_saver_default"
     }
 
     // ============================= Filters ==============================
 
     override fun getFilterList() = FilterList(
-        SortFilter(getSortFilter().map { it.name }.toTypedArray()),
-        SourceFilter(getSourceFilter()),
-        GenreGroupFilter(getGenreFilter()),
-        TagGroupFilter(getTagFilter()),
+        SortFilter(),
     )
+
+    class SortFilter(state: Int = 0) : UriPartFilter(
+        "Sort By",
+        arrayOf(
+            Pair("Relevance", "avg_views,desc"),
+            Pair("Latest", "updated_at"),
+            Pair("Latest Descending", "updated_at,desc"),
+            Pair("By Name", "series_name"),
+            Pair("By Name Descending", "series_name,desc"),
+            Pair("Books count", "books_count"),
+            Pair("Books count Descending", "books_count,desc"),
+            Pair("Created at", "created_at"),
+            Pair("Created at Descending", "created_at,desc"),
+        ),
+        state,
+    )
+
+    open class UriPartFilter(
+        displayName: String,
+        private val vals: Array<Pair<String, String>>,
+        state: Int = 0,
+    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
+        fun toUriPart() = vals[state].second
+        val selected get() = vals[state].second.takeUnless { it.isEmpty() }
+    }
 }

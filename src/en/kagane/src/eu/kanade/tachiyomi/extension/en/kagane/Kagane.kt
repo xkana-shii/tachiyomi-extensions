@@ -498,11 +498,11 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // Sort options helper
     private fun getSortOptions() = listOf(
-        SelectFilterOption("Relevance", "relevance"),
-        SelectFilterOption("Latest", "latest"),
-        SelectFilterOption("By Name", "name"),
-        SelectFilterOption("Books count", "books-count"),
-        SelectFilterOption("Created at", "created-at"),
+        SelectFilterOption("Relevance", ""),
+        SelectFilterOption("Latest", "updated_at"),
+        SelectFilterOption("By Name", "series_name"),
+        SelectFilterOption("Books count", "books_count"),
+        SelectFilterOption("Created at", "created_at"),
     )
 
     override fun getFilterList(): FilterList {

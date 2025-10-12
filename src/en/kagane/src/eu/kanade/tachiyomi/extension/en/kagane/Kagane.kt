@@ -29,8 +29,10 @@ import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -163,9 +165,58 @@ class Kagane : HttpSource(), ConfigurableSource {
     // =============================== Search ===============================
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val body = buildJsonObject { }
-            .toJsonString()
-            .toRequestBody("application/json".toMediaType())
+        val body = buildJsonObject {
+            filters.forEach { filter ->
+                when (filter) {
+                    is SourceGroupFilter -> {
+                        if (filter.selected.isNotEmpty()) {
+                            putJsonArray("sources") { filter.selected.forEach { add(JsonPrimitive(it)) } }
+                        }
+                    }
+                    is GenreGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
+                    }
+                    is TagGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }.toJsonString().toRequestBody("application/json".toMediaType())
 
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
@@ -175,35 +226,11 @@ class Kagane : HttpSource(), ConfigurableSource {
                 addQueryParameter("name", query)
             }
             filters.forEach { filter ->
-                when (filter) {
-                    is SortFilter -> {
-                        val uriPart = filter.toUriPart()
-                        if (uriPart.isNotEmpty()) {
-                            addQueryParameter("sort", uriPart)
-                        }
+                if (filter is SortFilter) {
+                    val uriPart = filter.toUriPart()
+                    if (uriPart.isNotEmpty()) {
+                        addQueryParameter("sort", uriPart)
                     }
-                    is SourceGroupFilter -> {
-                        if (filter.selected.isNotEmpty()) {
-                            addQueryParameter("source", filter.selected.joinToString(","))
-                        }
-                    }
-                    is GenreGroupFilter -> {
-                        if (filter.included.isNotEmpty()) {
-                            addQueryParameter("genre", filter.included.joinToString(","))
-                        }
-                        if (filter.excluded.isNotEmpty()) {
-                            addQueryParameter("genre_exclude", filter.excluded.joinToString(","))
-                        }
-                    }
-                    is TagGroupFilter -> {
-                        if (filter.included.isNotEmpty()) {
-                            addQueryParameter("tag", filter.included.joinToString(","))
-                        }
-                        if (filter.excluded.isNotEmpty()) {
-                            addQueryParameter("tag_exclude", filter.excluded.joinToString(","))
-                        }
-                    }
-                    else -> {}
                 }
             }
         }

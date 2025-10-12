@@ -104,14 +104,14 @@ class ChallengeDto(
 )
 
 @Serializable
-data class MetadataDto(
-    val sources: List<MetadataItem>,
-    val genres: List<MetadataItem>,
-    val tags: List<MetadataItem>,
+class MetadataDto(
+    val sources: List<MetaOptionDto>,
+    val genres: List<MetaOptionDto>,
+    val tags: List<MetaOptionDto>,
 )
 
 @Serializable
-data class MetadataItem(
+class MetaOptionDto(
     val name: String,
-    val count: Int,
+    val count: Int = 0, // Some metadata includes count
 )

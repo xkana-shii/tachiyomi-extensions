@@ -27,6 +27,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import okhttp3.Cookie
@@ -180,7 +182,27 @@ class Kagane : HttpSource(), ConfigurableSource {
                             addQueryParameter("sort", uriPart)
                         }
                     }
-
+                    is SourceGroupFilter -> {
+                        if (filter.selected.isNotEmpty()) {
+                            addQueryParameter("source", filter.selected.joinToString(","))
+                        }
+                    }
+                    is GenreGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            addQueryParameter("genre", filter.included.joinToString(","))
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            addQueryParameter("genre_exclude", filter.excluded.joinToString(","))
+                        }
+                    }
+                    is TagGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            addQueryParameter("tag", filter.included.joinToString(","))
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            addQueryParameter("tag_exclude", filter.excluded.joinToString(","))
+                        }
+                    }
                     else -> {}
                 }
             }
@@ -446,15 +468,45 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================= Filters ==============================
 
-    override fun getFilterList() = FilterList(
-        SortFilter(getSortFilter()),
-    )
+    // Metadata fetch and filter classes for Source, Genre, Tag
+    private var cachedMetadata: MetadataDto? = null
+    private fun getMetadata(): MetadataDto {
+        cachedMetadata?.let { return it }
+        val response = client.newCall(GET("https://api.kagane.org/api/v1/metadata")).execute()
+        val json = response.body.string()
+        val metadata = Json.decodeFromString<MetadataDto>(json)
+        cachedMetadata = metadata
+        return metadata
+    }
 
+    // Filter option classes
+    class CheckboxFilterOption(val value: String, name: String = value, default: Boolean = false) : Filter.CheckBox(name, default)
+    class TriStateFilterOption(val value: String, name: String = value, default: Int = 0) : Filter.TriState(name, default)
+
+    // Filter group classes
+    class SourceGroupFilter(options: List<CheckboxFilterOption>) : Filter.Group<CheckboxFilterOption>("Source", options) {
+        val selected: List<String>
+            get() = state.filter { it.state }.map { it.value }
+    }
+    class GenreGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Genre", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+    class TagGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Tag", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+
+    // Sort Filter
     class SelectFilterOption(val name: String, val value: String)
 
     class SortFilter(
         private val options: List<SelectFilterOption>,
-        selection: Filter.Sort.Selection = Filter.Sort.Selection(0, false),
+        selection: Selection = Selection(0, false),
     ) : Filter.Sort(
         "Sort By",
         options.map { it.name }.toTypedArray(),
@@ -478,4 +530,14 @@ class Kagane : HttpSource(), ConfigurableSource {
         SelectFilterOption("Books count", "books_count"),
         SelectFilterOption("Created at", "created_at"),
     )
+
+    override fun getFilterList(): FilterList {
+        val metadata = getMetadata()
+        return FilterList(
+            SortFilter(getSortFilter()),
+            SourceGroupFilter(metadata.sources.map { CheckboxFilterOption(it.name) }),
+            GenreGroupFilter(metadata.genres.map { TriStateFilterOption(it.name) }),
+            TagGroupFilter(metadata.tags.map { TriStateFilterOption(it.name) }),
+        )
+    }
 }

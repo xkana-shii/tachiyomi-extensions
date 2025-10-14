@@ -1,206 +1,141 @@
 package eu.kanade.tachiyomi.extension.all.comicklive
 
 import eu.kanade.tachiyomi.source.model.Filter
-import eu.kanade.tachiyomi.source.model.FilterList
+import java.util.Calendar
 
-fun getFilters(): FilterList {
-    return FilterList(
-        Filter.Header(name = "The filter is ignored when using text search."),
-        GenreFilter("Genre", getGenresList),
-        DemographicFilter("Demographic", getDemographicList),
-        TypeFilter("Type", getTypeList),
-        SortFilter(),
-        StatusFilter("Status", getStatusList),
-        // ContentRatingFilter("Content Rating", getContentRatingList),
-        // CompletedFilter("Completely Scanlated?"),
-        CreatedAtFilter("Created at", getCreatedAtList),
-        MinimumFilter("Minimum Chapters"),
-        Filter.Header("From Year, ex: 2010"),
-        FromYearFilter("From"),
-        Filter.Header("To Year, ex: 2021"),
-        ToYearFilter("To"),
-        Filter.Header("Separate tags with commas"),
-        TagFilter("Tags"),
-        ExcludedTagFilter("Excluded Tags"),
-    )
+abstract class SelectFilter(
+    name: String,
+    private val options: List<Pair<String, String>>,
+) : Filter.Select<String>(
+    name,
+    options.map { it.first }.toTypedArray(),
+) {
+    val selected get() = options[state].second.takeIf { it.isNotEmpty() }
 }
 
-/** Filters **/
-internal class GenreFilter(name: String, genreList: List<Pair<String, String>>) :
-    Filter.Group<TriFilter>(name, genreList.map { TriFilter(it.first, it.second) })
+class CheckBoxFilter(name: String, val value: String) : Filter.CheckBox(name)
 
-internal class TagFilter(name: String) : TextFilter(name)
-
-internal class ExcludedTagFilter(name: String) : TextFilter(name)
-
-internal class DemographicFilter(name: String, demographicList: List<Pair<String, String>>) :
-    Filter.Group<CheckBoxFilter>(name, demographicList.map { CheckBoxFilter(it.first, it.second) })
-
-internal class TypeFilter(name: String, typeList: List<Pair<String, String>>) :
-    Filter.Group<CheckBoxFilter>(name, typeList.map { CheckBoxFilter(it.first, it.second) })
-
-// internal class CompletedFilter(name: String) : CheckBoxFilter(name)
-
-internal class CreatedAtFilter(name: String, createdAtList: List<Pair<String, String>>) :
-    SelectFilter(name, createdAtList)
-
-internal class MinimumFilter(name: String) : TextFilter(name)
-
-internal class FromYearFilter(name: String) : TextFilter(name)
-
-internal class ToYearFilter(name: String) : TextFilter(name)
-
-internal class SortFilter(defaultValue: String? = null, state: Int = 0) :
-    SelectFilter("Sort", getSortsList, state, defaultValue)
-
-internal class StatusFilter(name: String, statusList: List<Pair<String, String>>, state: Int = 0) :
-    SelectFilter(name, statusList, state)
-
-// internal class ContentRatingFilter(name: String, statusList: List<Pair<String, String>>, state: Int = 0) :
-//     SelectFilter(name, statusList, state)
-
-/** Generics **/
-internal open class TriFilter(name: String, val value: String) : Filter.TriState(name)
-
-internal open class TextFilter(name: String) : Filter.Text(name)
-
-internal open class CheckBoxFilter(name: String, val value: String = "") : Filter.CheckBox(name)
-
-internal open class SelectFilter(name: String, private val vals: List<Pair<String, String>>, state: Int = 0, defaultValue: String? = null) :
-    Filter.Select<String>(name, vals.map { it.first }.toTypedArray(), vals.indexOfFirst { it.second == defaultValue }.takeIf { it != -1 } ?: state) {
-    fun getValue() = vals[state].second
+abstract class CheckBoxGroup(
+    name: String,
+    options: List<Pair<String, String>>,
+) : Filter.Group<CheckBoxFilter>(
+    name,
+    options.map { CheckBoxFilter(it.first, it.second) },
+) {
+    val checked get() = state.filter { it.state }.map { it.value }
 }
 
-/** Filters Data **/
-private val getGenresList: List<Pair<String, String>> = listOf(
-    Pair("4-Koma", "4-koma"),
-    Pair("Action", "action"),
-    Pair("Adaptation", "adaptation"),
-    Pair("Adult", "adult"),
-    Pair("Adventure", "adventure"),
-    Pair("Aliens", "aliens"),
-    Pair("Animals", "animals"),
-    Pair("Anthology", "anthology"),
-    Pair("Award Winning", "award-winning"),
-    Pair("Comedy", "comedy"),
-    Pair("Cooking", "cooking"),
-    Pair("Crime", "crime"),
-    Pair("Crossdressing", "crossdressing"),
-    Pair("Delinquents", "delinquents"),
-    Pair("Demons", "demons"),
-    Pair("Doujinshi", "doujinshi"),
-    Pair("Drama", "drama"),
-    Pair("Ecchi", "ecchi"),
-    Pair("Fan Colored", "fan-colored"),
-    Pair("Fantasy", "fantasy"),
-    Pair("Full Color", "full-color"),
-    Pair("Gender Bender", "gender-bender"),
-    Pair("Genderswap", "genderswap"),
-    Pair("Ghosts", "ghosts"),
-    Pair("Gore", "gore"),
-    Pair("Gyaru", "gyaru"),
-    Pair("Harem", "harem"),
-    Pair("Historical", "historical"),
-    Pair("Horror", "horror"),
-    Pair("Incest", "incest"),
-    Pair("Isekai", "isekai"),
-    Pair("Loli", "loli"),
-    Pair("Long Strip", "long-strip"),
-    Pair("Mafia", "mafia"),
-    Pair("Magic", "magic"),
-    Pair("Magical Girls", "magical-girls"),
-    Pair("Martial Arts", "martial-arts"),
-    Pair("Mature", "mature"),
-    Pair("Mecha", "mecha"),
-    Pair("Medical", "medical"),
-    Pair("Military", "military"),
-    Pair("Monster Girls", "monster-girls"),
-    Pair("Monsters", "monsters"),
-    Pair("Music", "music"),
-    Pair("Mystery", "mystery"),
-    Pair("Ninja", "ninja"),
-    Pair("Office Workers", "office-workers"),
-    Pair("Official Colored", "official-colored"),
-    Pair("Oneshot", "oneshot"),
-    Pair("Philosophical", "philosophical"),
-    Pair("Police", "police"),
-    Pair("Post-Apocalyptic", "post-apocalyptic"),
-    Pair("Psychological", "psychological"),
-    Pair("Reincarnation", "reincarnation"),
-    Pair("Reverse Harem", "reverse-harem"),
-    Pair("Romance", "romance"),
-    Pair("Samurai", "samurai"),
-    Pair("School Life", "school-life"),
-    Pair("Sci-Fi", "sci-fi"),
-    Pair("Sexual Violence", "sexual-violence"),
-    Pair("Shota", "shota"),
-    Pair("Shoujo Ai", "shoujo-ai"),
-    Pair("Shounen Ai", "shounen-ai"),
-    Pair("Slice of Life", "slice-of-life"),
-    Pair("Smut", "smut"),
-    Pair("Sports", "sports"),
-    Pair("Superhero", "superhero"),
-    Pair("Supernatural", "supernatural"),
-    Pair("Survival", "survival"),
-    Pair("Thriller", "thriller"),
-    Pair("Time Travel", "time-travel"),
-    Pair("Traditional Games", "traditional-games"),
-    Pair("Tragedy", "tragedy"),
-    Pair("User Created", "user-created"),
-    Pair("Vampires", "vampires"),
-    Pair("Video Games", "video-games"),
-    Pair("Villainess", "villainess"),
-    Pair("Virtual Reality", "virtual-reality"),
-    Pair("Web Comic", "web-comic"),
-    Pair("Wuxia", "wuxia"),
-    Pair("Yaoi", "yaoi"),
-    Pair("Yuri", "yuri"),
-    Pair("Zombies", "zombies"),
+class TriStateFilter(name: String, val slug: String) : Filter.TriState(name)
+
+abstract class TriStateGroupFilter(
+    name: String,
+    options: List<Pair<String, String>>,
+) : Filter.Group<TriStateFilter>(
+    name,
+    options.map { TriStateFilter(it.first, it.second) },
+) {
+    val included get() = state.filter { it.isIncluded() }.map { it.slug }
+    val excluded get() = state.filter { it.isExcluded() }.map { it.slug }
+}
+
+class SortFilter : SelectFilter(
+    name = "Sort",
+    options = listOf(
+        "Latest" to "created_at",
+        "Popular" to "user_follow_count",
+        "Highest Rating" to "rating",
+        "Last Uploaded" to "uploaded",
+    ),
 )
 
-private val getDemographicList: List<Pair<String, String>> = listOf(
-    Pair("Shounen", "1"),
-    Pair("Shoujo", "2"),
-    Pair("Seinen", "3"),
-    Pair("Josei", "4"),
-    Pair("None", "5"),
+class GenreFilter(genres: List<Metadata.Name>) : TriStateGroupFilter(
+    name = "Genre",
+    options = genres.map { it.name to it.slug },
 )
 
-private val getTypeList: List<Pair<String, String>> = listOf(
-    Pair("Manga", "jp"),
-    Pair("Manhwa", "kr"),
-    Pair("Manhua", "cn"),
-    Pair("Others", "others"),
+class TagFilter(tags: List<Metadata.Name>) : TriStateGroupFilter(
+    name = "Tags",
+    options = tags.map { it.name to it.slug },
 )
 
-private val getCreatedAtList: List<Pair<String, String>> = listOf(
-    Pair("", ""),
-    Pair("3 days", "3"),
-    Pair("7 days", "7"),
-    Pair("30 days", "30"),
-    Pair("3 months", "90"),
-    Pair("6 months", "180"),
-    Pair("1 year", "365"),
+class DemographicFilter : CheckBoxGroup(
+    name = "Demographic",
+    options = listOf(
+        "Shounen" to "1",
+        "Josei" to "2",
+        "Seinen" to "3",
+        "Shoujo" to "4",
+        "None" to "0",
+    ),
 )
 
-private val getSortsList: List<Pair<String, String>> = listOf(
-    Pair("Newest", "created_at"),
-    Pair("Last updated", "uploaded"),
-    Pair("Popular", "user_follow_count"),
-    Pair("High rating", "rating"),
+class CreatedAtFilter : SelectFilter(
+    name = "Created At",
+    options = listOf(
+        "" to "",
+        "3 days ago" to "3",
+        "7 days ago" to "7",
+        "30 days ago" to "30",
+        "3 months ago" to "90",
+        "6 months ago" to "180",
+        "1 year ago" to "365",
+        "2 years ago" to "730",
+    ),
 )
 
-private val getStatusList: List<Pair<String, String>> = listOf(
-    Pair("All", "0"),
-    Pair("Ongoing", "1"),
-    Pair("Completed", "2"),
-    Pair("Cancelled", "3"),
-    Pair("Hiatus", "4"),
+class TypeFilter : CheckBoxGroup(
+    name = "Type",
+    options = listOf(
+        "Manga" to "jp",
+        "Manhwa" to "kr",
+        "Manhua" to "cn",
+        "Others" to "others",
+    ),
 )
 
-private val getContentRatingList: List<Pair<String, String>> = listOf(
-    Pair("All", ""),
-    Pair("Safe", "safe"),
-    Pair("Suggestive", "suggestive"),
-    Pair("Erotica", "erotica"),
+class MinimumChaptersFilter : Filter.Text(
+    name = "Minimum Chapters",
+)
+
+class StatusFilter : SelectFilter(
+    name = "Status",
+    options = listOf(
+        "" to "",
+        "Ongoing" to "1",
+        "Completed" to "2",
+        "Cancelled" to "3",
+        "Hiatus" to "4",
+    ),
+)
+
+class ContentRatingFilter : SelectFilter(
+    name = "Content Rating",
+    options = listOf(
+        "" to "",
+        "Safe" to "safe",
+        "Suggestive" to "suggestive",
+        "Erotica" to "erotica",
+    ),
+)
+
+class ReleaseFrom : SelectFilter(
+    name = "Release From",
+    options = buildList {
+        add(("" to ""))
+        Calendar.getInstance().get(Calendar.YEAR).downTo(1990).mapTo(this) {
+            ("$it" to it.toString())
+        }
+        add(("Before 1990" to "0"))
+    },
+)
+
+class ReleaseTo : SelectFilter(
+    name = "Release To",
+    options = buildList {
+        add(("" to ""))
+        Calendar.getInstance().get(Calendar.YEAR).downTo(1990).mapTo(this) {
+            ("$it" to it.toString())
+        }
+        add(("Before 1990" to "0"))
+    },
 )

@@ -372,21 +372,13 @@ open class BatoTo(
         val removedParts = mutableListOf<String>()
         var cleanedTitle = title
 
-        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
-            val regex = Regex(customRegex)
-            regex.findAll(cleanedTitle).forEach { matchResult ->
-                val part = matchResult.value.trim()
-                if (part.isNotBlank()) removedParts.add(part)
-            }
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
             cleanedTitle = cleanedTitle.replace(regex, "")
         }
-        if (isRemoveTitleVersion()) {
-            titleRegex.findAll(cleanedTitle).forEach { matchResult ->
-                val part = matchResult.value.trim()
-                if (part.isNotBlank()) removedParts.add(part)
-            }
-            cleanedTitle = cleanedTitle.replace(titleRegex, "")
-        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
         cleanedTitle = cleanedTitle.trim()
 
         val description = buildString {

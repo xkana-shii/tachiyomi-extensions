@@ -424,9 +424,7 @@ open class BatoTo(
             } else {
                 val label = try {
                     val host = when {
-                        url.startsWith("mailto:") -> "Email"
-                        url.startsWith("magnet:") -> "Magnet"
-                        url.startsWith("file:") -> "File"
+                        url.startsWith("https://www.") || url.startsWith("http://www.") -> url.substringAfter("://www.").substringBefore('/').substringBefore(':').substringBefore('?')
                         url.startsWith("www.") -> url.substringAfter("www.").substringBefore('/').substringBefore(':').substringBefore('?')
                         else -> url.substringBefore('/').substringBefore(':').substringBefore('?')
                     }

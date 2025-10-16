@@ -368,6 +368,27 @@ open class BatoTo(
         val workStatus = infoElement.selectFirst("div.attr-item:contains(original work) span")?.text()
         val uploadStatus = infoElement.selectFirst("div.attr-item:contains(upload status) span")?.text()
         val title = infoElement.select("h3").text().removeEntities()
+
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = title
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
+            val regex = Regex(customRegex)
+            regex.findAll(cleanedTitle).forEach { matchResult ->
+                val part = matchResult.value.trim()
+                if (part.isNotBlank()) removedParts.add(part)
+            }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+        if (isRemoveTitleVersion()) {
+            titleRegex.findAll(cleanedTitle).forEach { matchResult ->
+                val part = matchResult.value.trim()
+                if (part.isNotBlank()) removedParts.add(part)
+            }
+            cleanedTitle = cleanedTitle.replace(titleRegex, "")
+        }
+        cleanedTitle = cleanedTitle.trim()
+
         val description = buildString {
             append(infoElement.select("div.limit-html").text())
             infoElement.selectFirst(".episode-list > .alert-warning")?.also {
@@ -380,32 +401,18 @@ open class BatoTo(
                 append("\n\n----\n#### **Alternative Titles**\n")
                 append(it.text().split('/').joinToString("\n- ", prefix = "- "))
             }
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- $it\n") }
+            }
         }.trim()
-
-        val cleanedTitle = title.let { originalTitle ->
-            var tempTitle = originalTitle
-            customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
-                runCatching {
-                    tempTitle = tempTitle.replace(Regex(customRegex), "")
-                }
-            }
-            if (isRemoveTitleVersion()) {
-                tempTitle = tempTitle.replace(titleRegex, "")
-            }
-            tempTitle.trim()
-        }
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = if (title.trim() != cleanedTitle) {
-            listOf(title, description)
-                .joinToString("\n\n")
-        } else {
-            description
-        }
+        manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }

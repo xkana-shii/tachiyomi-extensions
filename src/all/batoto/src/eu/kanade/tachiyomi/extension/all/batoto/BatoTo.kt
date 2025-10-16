@@ -443,12 +443,12 @@ open class BatoTo(
                                     url
                                 },
                             ).host
-                        } catch (e: Exception) {
+                        } catch (_: Exception) {
                             url.substringBefore('/').substringBefore('?')
                         }
                     }
                     if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
-                } catch (e: Exception) { null }
+                } catch (_: Exception) { null }
                 if (label != null) "[$label]($url)" else "<$url>"
             }
         }.trim()

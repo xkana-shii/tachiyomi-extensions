@@ -361,15 +361,13 @@ open class BatoTo(
         }
         return super.mangaDetailsRequest(manga)
     }
-    private var titleRegex: Regex =
-        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document): SManga {
         val infoElement = document.selectFirst("div#mainer div.container-fluid")!!
         val manga = SManga.create()
         val workStatus = infoElement.selectFirst("div.attr-item:contains(original work) span")?.text()
         val uploadStatus = infoElement.selectFirst("div.attr-item:contains(upload status) span")?.text()
-        val originalTitle = infoElement.select("h3").text().removeEntities()
+        val title = infoElement.select("h3").text().removeEntities()
         val description = buildString {
             append(infoElement.select("div.limit-html").text())
             infoElement.selectFirst(".episode-list > .alert-warning")?.also {
@@ -382,47 +380,32 @@ open class BatoTo(
                 append("\n\n----\n#### **Alternative Titles**\n")
                 append(it.text().split('/').joinToString("\n- ", prefix = "- "))
             }
-
-            val matches = mutableListOf<String>() // Store the matched strings directly
-
-            val tempTitle = if (isRemoveTitleVersion()) {
-                var shortName = originalTitle
-                while (titleRegex.containsMatchIn(shortName)) {
-                    val match = titleRegex.find(shortName)!!
-                    matches.add(match.value) // Store match.value
-                    shortName = shortName.replace(match.value, "").trim()
-                }
-                shortName
-            } else {
-                originalTitle
-            }
-
-            if (customRemoveTitle().isNotEmpty()) {
-                val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
-                customRegex.findAll(tempTitle).forEach { matchResult ->
-                    matches.add(matchResult.value)
-                }
-            }
-
-            if (matches.isNotEmpty()) {
-                append("\n\n----\n#### **Removed from title**\n")
-                matches.forEach { match ->
-                    append("- `$match`\n") // Correctly use the stored string
-                }
-            }
         }.trim()
 
-        val cleanedTitle = originalTitle
-            .replace(Regex(customRemoveTitle()), "")
-            .replace(if (isRemoveTitleVersion()) titleRegex else Regex(""), "")
-            .trim()
+        val cleanedTitle = title.let { originalTitle ->
+            var tempTitle = originalTitle
+            customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
+                runCatching {
+                    tempTitle = tempTitle.replace(Regex(customRegex), "")
+                }
+            }
+            if (isRemoveTitleVersion()) {
+                tempTitle = tempTitle.replace(titleRegex, "")
+            }
+            tempTitle.trim()
+        }
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = description
+        manga.description = if (title.trim() != cleanedTitle) {
+            listOf(title, description)
+                .joinToString("\n\n")
+        } else {
+            description
+        }
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
@@ -1147,5 +1130,8 @@ open class BatoTo(
         private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"
         private const val ALT_CHAPTER_LIST_PREF_SUMMARY = "If checked, uses an alternate chapter list"
         private const val ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE = false
+
+        private val titleRegex: Regex =
+            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|/Official|/ Official", RegexOption.IGNORE_CASE)
     }
 }

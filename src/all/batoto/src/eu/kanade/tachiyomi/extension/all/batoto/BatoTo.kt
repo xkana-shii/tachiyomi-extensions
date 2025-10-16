@@ -2,11 +2,12 @@ package eu.kanade.tachiyomi.extension.all.batoto
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.widget.Toast
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
-import eu.kanade.tachiyomi.extension.BuildConfig
+import eu.kanade.tachiyomi.extensions.BuildConfig
 import eu.kanade.tachiyomi.lib.cryptoaes.CryptoAES
 import eu.kanade.tachiyomi.lib.cryptoaes.Deobfuscator
 import eu.kanade.tachiyomi.network.GET
@@ -87,20 +88,21 @@ open class BatoTo(
         }
         val removeCustomPref = EditTextPreference(screen.context).apply {
             key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
-            title = "Remove custom information from title"
-            summary = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+            title = "Custom regex to be removed from title"
+            summary = customRemoveTitle()
             setDefaultValue("")
-        }
-        val openLinksInV3xPref = CheckBoxPreference(screen.context).apply {
-            key = "${OPEN_LINKS_IN_V3X_PREF_KEY}_$lang"
-            title = "Open links in v3x"
-            setDefaultValue(true)
+            setOnPreferenceChangeListener { _, newValue ->
+                runCatching {
+                    Regex(newValue as String)
+                }.onFailure {
+                    Toast.makeText(screen.context, it.message, Toast.LENGTH_LONG).show()
+                }.isSuccess
+            }
         }
         screen.addPreference(mirrorPref)
         screen.addPreference(altChapterListPref)
         screen.addPreference(removeOfficialPref)
         screen.addPreference(removeCustomPref)
-        screen.addPreference(openLinksInV3xPref)
     }
 
     private fun getMirrorPref(): String {
@@ -132,9 +134,7 @@ open class BatoTo(
         return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", true)
     }
     private fun customRemoveTitle(): String =
-        preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
-
-    private fun getOpenLinksInV3xPref(): Boolean = preferences.getBoolean("${OPEN_LINKS_IN_V3X_PREF_KEY}_$lang", false)
+        preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
 
     private fun SharedPreferences.migrateMirrorPref() {
         val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
@@ -1068,29 +1068,6 @@ open class BatoTo(
         CheckboxFilterOption("pt-PT", "Portuguese (Portugal)"),
     ).filterNot { it.value == siteLang }
 
-    private val v3xMangaUrlRegex = Regex("(.+)/series/([0-9]+)/.+")
-    private val v3xChapterUrlRegex = Regex("(.+)/chapter/([0-9]+)")
-
-    override fun getMangaUrl(manga: SManga): String {
-        if (getOpenLinksInV3xPref()) {
-            val (_, baseUrl, mangaId) =
-                v3xMangaUrlRegex.matchEntire(super.getMangaUrl(manga))?.groupValues
-                    ?: return super.getMangaUrl(manga)
-            return "$baseUrl/title/$mangaId"
-        }
-        return super.getMangaUrl(manga)
-    }
-
-    override fun getChapterUrl(chapter: SChapter): String {
-        if (getOpenLinksInV3xPref()) {
-            val (_, baseUrl, chapterId) =
-                v3xChapterUrlRegex.matchEntire(super.getChapterUrl(chapter))?.groupValues
-                    ?: return super.getChapterUrl(chapter)
-            return "$baseUrl/title/0/$chapterId"
-        }
-        return super.getChapterUrl(chapter)
-    }
-
     companion object {
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val MIRROR_PREF_TITLE = "Mirror"
@@ -1170,6 +1147,5 @@ open class BatoTo(
         private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"
         private const val ALT_CHAPTER_LIST_PREF_SUMMARY = "If checked, uses an alternate chapter list"
         private const val ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE = false
-        private const val OPEN_LINKS_IN_V3X_PREF_KEY = "OPEN_LINKS_IN_V3X"
     }
 }

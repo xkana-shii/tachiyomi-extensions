@@ -41,7 +41,6 @@ import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
-import java.net.URL
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar

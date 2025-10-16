@@ -412,7 +412,7 @@ open class BatoTo(
     }
 
     private fun autoMarkdownLinks(input: String): String {
-        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>()\[\]]*)?)""")
         return urlRegex.replace(input) { matchResult ->
             val url = matchResult.value
             val start = matchResult.range.first
@@ -424,18 +424,30 @@ open class BatoTo(
             } else {
                 val label = try {
                     val host = when {
-                        url.startsWith("https://www.") || url.startsWith("http://www.") ->
-                            url.substringAfter("://").substringBefore('/').substringBefore(':').substringBefore('?')
-                        url.startsWith("www.") ->
-                            url.substringBefore('/').substringBefore(':').substringBefore('?')
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
                         else -> try {
-                            java.net.URL(url).host
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
                         } catch (e: Exception) {
                             url.substringBefore('/').substringBefore('?')
                         }
                     }
-                    val domain = host.removePrefix("www.").substringBefore('.')
-                    if (domain.isNotEmpty() && domain.any { it.isLetter() }) domain.replaceFirstChar { it.uppercase() } else null
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
                 } catch (e: Exception) { null }
                 if (label != null) "[$label]($url)" else "<$url>"
             }

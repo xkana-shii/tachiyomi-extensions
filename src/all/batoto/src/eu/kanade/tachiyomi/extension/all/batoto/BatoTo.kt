@@ -395,7 +395,7 @@ open class BatoTo(
             }
             if (removedParts.isNotEmpty()) {
                 append("\n\n----\n#### **Removed From Title**\n")
-                removedParts.forEach { append("- $it\n") }
+                removedParts.forEach { append("- `$it`\n") }
             }
         }.trim()
 

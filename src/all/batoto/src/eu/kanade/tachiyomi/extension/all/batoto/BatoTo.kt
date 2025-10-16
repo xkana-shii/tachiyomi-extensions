@@ -413,7 +413,7 @@ open class BatoTo(
     }
 
     private fun autoMarkdownLinks(input: String): String {
-        val urlRegex = Regex("""https?:\/\/(?:www\.)?[\w\-.]+(?:\.[a-z]{2,6})+(?:\/[^\s<>()\[\]]*)?""")
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>()\[\]]*)?)""")
         return urlRegex.replace(input) { matchResult ->
             val url = matchResult.value
             val start = matchResult.range.first
@@ -424,7 +424,13 @@ open class BatoTo(
                 url
             } else {
                 val label = try {
-                    val host = URL(url).host.removePrefix("www.")
+                    val host = when {
+                        url.startsWith("mailto:") -> "Email"
+                        url.startsWith("magnet:") -> "Magnet"
+                        url.startsWith("file:") -> "File"
+                        url.startsWith("www.") -> url.substringAfter("www.").substringBefore('/').substringBefore(':').substringBefore('?')
+                        else -> url.substringBefore('/').substringBefore(':').substringBefore('?')
+                    }
                     val domain = host.substringBefore('.')
                     if (domain.isNotEmpty() && domain.any { it.isLetter() }) domain.replaceFirstChar { it.uppercase() } else null
                 } catch (e: Exception) { null }

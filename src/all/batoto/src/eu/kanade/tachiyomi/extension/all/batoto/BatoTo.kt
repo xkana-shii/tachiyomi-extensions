@@ -424,11 +424,17 @@ open class BatoTo(
             } else {
                 val label = try {
                     val host = when {
-                        url.startsWith("https://www.") || url.startsWith("http://www.") -> url.substringAfter("://www.").substringBefore('/').substringBefore(':').substringBefore('?')
-                        url.startsWith("www.") -> url.substringAfter("www.").substringBefore('/').substringBefore(':').substringBefore('?')
-                        else -> url.substringBefore('/').substringBefore(':').substringBefore('?')
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ->
+                            url.substringAfter("://").substringBefore('/').substringBefore(':').substringBefore('?')
+                        url.startsWith("www.") ->
+                            url.substringBefore('/').substringBefore(':').substringBefore('?')
+                        else -> try {
+                            java.net.URL(url).host
+                        } catch (e: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
                     }
-                    val domain = host.substringBefore('.')
+                    val domain = host.removePrefix("www.").substringBefore('.')
                     if (domain.isNotEmpty() && domain.any { it.isLetter() }) domain.replaceFirstChar { it.uppercase() } else null
                 } catch (e: Exception) { null }
                 if (label != null) "[$label]($url)" else "<$url>"

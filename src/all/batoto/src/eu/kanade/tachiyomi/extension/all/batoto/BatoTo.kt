@@ -41,6 +41,7 @@ import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.net.URL
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -382,7 +383,9 @@ open class BatoTo(
         cleanedTitle = cleanedTitle.trim()
 
         val description = buildString {
-            append(infoElement.select("div.limit-html").text())
+            infoElement.selectFirst("h5:containsOwn(Summary:) + div #limit-height-ctrl-summary #limit-height-body-summary .limit-html")?.also {
+                append("\n\n----\n#### **Summary**\n${it.wholeText()}")
+            }
             infoElement.selectFirst(".episode-list > .alert-warning")?.also {
                 append("\n\n${it.text()}")
             }
@@ -397,7 +400,7 @@ open class BatoTo(
                 append("\n\n----\n#### **Removed From Title**\n")
                 removedParts.forEach { append("- `$it`\n") }
             }
-        }.trim()
+        }.trim().let { desc -> autoMarkdownLinks(desc) }
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
@@ -408,6 +411,28 @@ open class BatoTo(
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""https?:\/\/(?:www\.)?[\w\-.]+(?:\.[a-z]{2,6})+(?:\/[^\s<>()\[\]]*)?""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = URL(url).host.removePrefix("www.")
+                    val domain = host.substringBefore('.')
+                    if (domain.isNotEmpty() && domain.any { it.isLetter() }) domain.replaceFirstChar { it.uppercase() } else null
+                } catch (e: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
+    }
+
     private fun parseStatus(workStatus: String?, uploadStatus: String?): Int {
         val status = workStatus ?: uploadStatus
         return when {

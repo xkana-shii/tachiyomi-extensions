@@ -27,8 +27,12 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -139,23 +143,80 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================== Popular ===============================
 
     override fun popularMangaRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(1)))
+        searchMangaRequest(
+            page,
+            "",
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(1, false))),
+        )
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int) =
-        searchMangaRequest(page, "", FilterList(SortFilter(2)))
+        searchMangaRequest(
+            page,
+            "",
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(2, false))),
+        )
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val body = buildJsonObject { }
-            .toJsonString()
-            .toRequestBody("application/json".toMediaType())
+        val body = buildJsonObject {
+            filters.forEach { filter ->
+                when (filter) {
+                    is SourceGroupFilter -> {
+                        if (filter.selected.isNotEmpty()) {
+                            putJsonArray("sources") { filter.selected.forEach { add(JsonPrimitive(it)) } }
+                        }
+                    }
+                    is GenreGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
+                    }
+                    is TagGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }.toJsonString().toRequestBody("application/json".toMediaType())
 
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
@@ -165,14 +226,11 @@ class Kagane : HttpSource(), ConfigurableSource {
                 addQueryParameter("name", query)
             }
             filters.forEach { filter ->
-                when (filter) {
-                    is SortFilter -> {
-                        filter.selected?.let {
-                            addQueryParameter("sort", filter.toUriPart())
-                        }
+                if (filter is SortFilter) {
+                    val uriPart = filter.toUriPart()
+                    if (uriPart.isNotEmpty()) {
+                        addQueryParameter("sort", uriPart)
                     }
-
-                    else -> {}
                 }
             }
         }
@@ -437,33 +495,72 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================= Filters ==============================
 
-    override fun getFilterList() = FilterList(
-        SortFilter(),
-    )
+    private var cachedMetadata: MetadataDto? = null
+    private fun getMetadata(): MetadataDto {
+        cachedMetadata?.let { return it }
+        val response = client.newCall(GET("https://api.kagane.org/api/v1/metadata")).execute()
+        val json = response.body.string()
+        val metadata = Json.decodeFromString<MetadataDto>(json)
+        cachedMetadata = metadata
+        return metadata
+    }
 
-    class SortFilter(state: Int = 0) : UriPartFilter(
+    class CheckboxFilterOption(val value: String, name: String = value, default: Boolean = false) : Filter.CheckBox(name, default)
+    class TriStateFilterOption(val value: String, name: String = value, default: Int = 0) : Filter.TriState(name, default)
+
+    class SourceGroupFilter(options: List<CheckboxFilterOption>) : Filter.Group<CheckboxFilterOption>("Source", options) {
+        val selected: List<String>
+            get() = state.filter { it.state }.map { it.value }
+    }
+    class GenreGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Genre", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+    class TagGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Tag", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+
+    class SelectFilterOption(val name: String, val value: String)
+
+    class SortFilter(
+        private val options: List<SelectFilterOption>,
+        selection: Selection = Selection(0, false),
+    ) : Filter.Sort(
         "Sort By",
-        arrayOf(
-            Pair("Relevance", ""),
-            Pair("Popular", "avg_views,desc"),
-            Pair("Latest", "updated_at"),
-            Pair("Latest Descending", "updated_at,desc"),
-            Pair("By Name", "series_name"),
-            Pair("By Name Descending", "series_name,desc"),
-            Pair("Books count", "books_count"),
-            Pair("Books count Descending", "books_count,desc"),
-            Pair("Created at", "created_at"),
-            Pair("Created at Descending", "created_at,desc"),
-        ),
-        state,
+        options.map { it.name }.toTypedArray(),
+        selection,
+    ) {
+        val selected: SelectFilterOption
+            get() = options[state!!.index]
+
+        fun toUriPart(): String {
+            val base = selected.value
+            val order = if (state!!.ascending) "" else ",desc"
+            return if (base.isNotEmpty()) base + order else ""
+        }
+    }
+
+    private fun getSortFilter() = listOf(
+        SelectFilterOption("Relevance", ""),
+        SelectFilterOption("Popular", "avg_views"),
+        SelectFilterOption("Latest", "updated_at"),
+        SelectFilterOption("By Name", "series_name"),
+        SelectFilterOption("Books count", "books_count"),
+        SelectFilterOption("Created at", "created_at"),
     )
 
-    open class UriPartFilter(
-        displayName: String,
-        private val vals: Array<Pair<String, String>>,
-        state: Int = 0,
-    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), state) {
-        fun toUriPart() = vals[state].second
-        val selected get() = vals[state].second.takeUnless { it.isEmpty() }
+    override fun getFilterList(): FilterList {
+        val metadata = getMetadata()
+        return FilterList(
+            SortFilter(getSortFilter()),
+            SourceGroupFilter(metadata.sources.map { CheckboxFilterOption(it.name) }),
+            GenreGroupFilter(metadata.genres.map { TriStateFilterOption(it.name) }),
+            TagGroupFilter(metadata.tags.map { TriStateFilterOption(it.name) }),
+        )
     }
 }

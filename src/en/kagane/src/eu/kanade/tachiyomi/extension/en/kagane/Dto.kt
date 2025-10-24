@@ -102,3 +102,16 @@ class ChallengeDto(
     @SerialName("access_token")
     val accessToken: String,
 )
+
+@Serializable
+class MetadataDto(
+    val sources: List<MetaOptionDto>,
+    val genres: List<MetaOptionDto>,
+    val tags: List<MetaOptionDto>,
+)
+
+@Serializable
+class MetaOptionDto(
+    val name: String,
+    val count: Int = 0,
+)

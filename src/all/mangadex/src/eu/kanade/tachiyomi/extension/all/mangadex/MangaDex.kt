@@ -743,7 +743,7 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
             key = MDConstants.getAltTitlesInDescPrefKey(dexLang)
             title = helper.intl["alternative_titles_in_description"]
             summary = helper.intl["alternative_titles_in_description_summary"]
-            setDefaultValue(false)
+            setDefaultValue(true)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean
@@ -758,7 +758,7 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
             key = MDConstants.getPreferExtensionLangTitlePrefKey(dexLang)
             title = helper.intl["prefer_title_in_extension_language"]
             summary = helper.intl["prefer_title_in_extension_language_summary"]
-            setDefaultValue(true)
+            setDefaultValue(false)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean
@@ -773,7 +773,7 @@ abstract class MangaDex(final override val lang: String, private val dexLang: St
             key = MDConstants.getFinalChapterInDescPrefKey(dexLang)
             title = helper.intl["final_chapter_in_description"]
             summary = helper.intl["final_chapter_in_description_summary"]
-            setDefaultValue(true)
+            setDefaultValue(false)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean

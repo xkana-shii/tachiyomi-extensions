@@ -86,10 +86,7 @@ open class BatoTo(
         val removeOfficialPref = CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
             title = "Remove version information from entry titles"
-            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
-                "and helps identify duplicate entries in your library. " +
-                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
-                "You might also want to clear the database in advanced settings."
+            summary = "This removes version tags like '(Official)' from entry titles."
             setDefaultValue(false)
         }
         val removeCustomPref = EditTextPreference(screen.context).apply {
@@ -198,6 +195,7 @@ open class BatoTo(
         val imgurl = item.select("img").attr("abs:src")
         manga.setUrlWithoutDomain(stripSeriesUrl(item.attr("href")))
         manga.title = element.select("a.item-title").text().removeEntities()
+            .cleanTitleIfNeeded()
         manga.thumbnail_url = imgurl
         return manga
     }
@@ -322,6 +320,7 @@ open class BatoTo(
         val infoElement = document.select("div#mainer div.container-fluid")
         val manga = SManga.create()
         manga.title = infoElement.select("h3").text().removeEntities()
+            .cleanTitleIfNeeded()
         manga.thumbnail_url = document.select("div.attr-cover img")
             .attr("abs:src")
         manga.setUrlWithoutDomain(stripSeriesUrl(infoElement.select("h3 a").attr("abs:href")))
@@ -357,6 +356,7 @@ open class BatoTo(
         val manga = SManga.create()
         manga.setUrlWithoutDomain(stripSeriesUrl(element.select("td a").attr("href")))
         manga.title = element.select("td a").text()
+            .cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
         return manga
     }
@@ -365,6 +365,7 @@ open class BatoTo(
         val manga = SManga.create()
         manga.setUrlWithoutDomain(stripSeriesUrl(element.select(".position-relative a").attr("href")))
         manga.title = element.select(".position-relative a").text()
+            .cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
         return manga
     }
@@ -400,35 +401,92 @@ open class BatoTo(
         val workStatus = infoElement.selectFirst("div.attr-item:contains(original work) span")?.text()
         val uploadStatus = infoElement.selectFirst("div.attr-item:contains(upload status) span")?.text()
         val originalTitle = infoElement.select("h3").text().removeEntities()
+
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = originalTitle
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+
         val description = buildString {
-            append(infoElement.select("div.limit-html").text())
+            infoElement.selectFirst("h5:containsOwn(Summary:) + div #limit-height-ctrl-summary #limit-height-body-summary .limit-html")?.also {
+                append("\n\n----\n#### **Summary**\n${it.wholeText()}")
+            }
             infoElement.selectFirst(".episode-list > .alert-warning")?.also {
                 append("\n\n${it.text()}")
             }
             infoElement.selectFirst("h5:containsOwn(Extra Info:) + div")?.also {
-                append("\n\nExtra Info:\n${it.wholeText()}")
+                append("\n\n----\n#### **Extra Info**\n${it.wholeText()}")
             }
             document.selectFirst("div.pb-2.alias-set.line-b-f")?.takeIf { it.hasText() }?.also {
-                append("\n\nAlternative Titles:\n")
-                append(it.text().split('/').joinToString("\n") { "• ${it.trim()}" })
+                append("\n\n----\n#### **Alternative Titles**\n")
+                append(it.text().split('/').joinToString("\n- ", prefix = "- "))
             }
-        }.trim()
-        val cleanedTitle = originalTitle.cleanTitleIfNeeded()
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- `$it`\n") }
+            }
+        }.trim().let { desc -> autoMarkdownLinks(desc) }
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = if (originalTitle.trim() != cleanedTitle) {
-            listOf(originalTitle, description)
-                .joinToString("\n\n")
-        } else {
-            description
-        }
+        manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = when {
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
+                        else -> try {
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
+                        } catch (_: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
+                    }
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
+                } catch (_: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
+    }
+
     private fun parseStatus(workStatus: String?, uploadStatus: String?): Int {
         val status = workStatus ?: uploadStatus
         return when {
@@ -1172,6 +1230,6 @@ open class BatoTo(
         private const val ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE = false
 
         private val titleRegex: Regex =
-            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|/Official|/ Official", RegexOption.IGNORE_CASE)
+            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
     }
 }

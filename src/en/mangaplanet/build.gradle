@@ -1,4 +1,5 @@
 ext {
+    kmkVersionCode = 2
     extName = "Manga Planet"
     extClass = ".MangaPlanet"
     extVersionCode = 2

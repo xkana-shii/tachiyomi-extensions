@@ -5,6 +5,8 @@ import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import org.jsoup.Jsoup
+import kotlin.text.replace
+import kotlin.text.trim
 
 typealias SearchResponse = Data<SearchComics>
 typealias DetailsResponse = Data<ComicNode>
@@ -44,17 +46,24 @@ class MangaParkComic(
     @SerialName("max_chapterNode") private val latestChapter: Data<ImageFiles>? = null,
     @SerialName("first_chapterNode") private val firstChapter: Data<ImageFiles>? = null,
 ) {
-    fun toSManga(shortenTitle: Boolean, pageAsCover: String) = SManga.create().apply {
+    fun toSManga(shortenTitle: Boolean, pageAsCover: String, customTitleRegex: Regex) = SManga.create().apply {
         url = "$urlPath#$id"
         title = if (shortenTitle) {
             var shortName = name
-            while (shortenTitleRegex.containsMatchIn(shortName)) {
-                shortName = shortName.replace(shortenTitleRegex, "").trim()
+            while (shortenTitleRegex.containsMatchIn(shortName)) { // Use the Regex from companion object.
+                shortName = shortName.replace(shortenTitleRegex, "").trim() // Use the Regex from companion object.
+            }
+            if (customTitleRegex.pattern.isNotEmpty()) {
+                shortName = shortName.replace(customTitleRegex, "").trim()
             }
 
             shortName
         } else {
-            name
+            if (customTitleRegex.pattern.isNotEmpty()) {
+                name.replace(customTitleRegex, "").trim()
+            } else {
+                name
+            }
         }
         thumbnail_url = run {
             val coverUrl = cover?.let {
@@ -78,25 +87,56 @@ class MangaParkComic(
         author = authors?.joinToString()
         artist = artists?.joinToString()
         description = buildString {
-            if (shortenTitle) {
-                append(name)
-                append("\n\n")
-            }
             summary?.also {
                 append(Jsoup.parse(it).wholeText().trim())
                 append("\n\n")
             }
             extraInfo?.takeUnless(String::isBlank)?.also {
-                append("Extra Info:\n")
+                append("\n\n----\n#### **Extra Info**\n")
                 append(Jsoup.parse(it).wholeText().trim())
                 append("\n\n")
             }
             altNames?.takeUnless(List<String>::isEmpty)
                 ?.joinToString(
-                    prefix = "Alternative Names:\n",
+                    prefix = "\n\n----\n#### **Alternative Titles**\n",
                     separator = "\n",
-                ) { "• ${it.trim()}" }
+                ) { "- ${it.trim()}" }
                 ?.also(::append)
+
+            val matches = mutableListOf<String>() // Store the matched strings directly
+
+            if (shortenTitle) {
+                val tempTitle = if (shortenTitleRegex.containsMatchIn(name)) {
+                    var shortName = name
+                    while (shortenTitleRegex.containsMatchIn(shortName)) {
+                        val match = shortenTitleRegex.find(shortName)!!
+                        matches.add(match.value) // Store match.value
+                        shortName = shortName.replace(match.value, "").trim()
+                    }
+                    shortName
+                } else {
+                    name
+                }
+
+                if (customTitleRegex.pattern.isNotEmpty()) {
+                    customTitleRegex.findAll(tempTitle).forEach { matchResult ->
+                        matches.add(matchResult.value)
+                    }
+                }
+            } else {
+                if (customTitleRegex.pattern.isNotEmpty()) {
+                    customTitleRegex.findAll(name).forEach { matchResult ->
+                        matches.add(matchResult.value)
+                    }
+                }
+            }
+
+            if (matches.isNotEmpty()) {
+                append("\n\n----\n#### **Removed from title**\n")
+                matches.forEach { match ->
+                    append("- `$match`\n")
+                }
+            }
         }.trim()
         genre = genres?.joinToString { it.replace("_", " ").toCamelCase() }
         status = when (originalStatus ?: uploadStatus) {
@@ -138,7 +178,7 @@ class MangaParkComic(
             }
         }
 
-        private val shortenTitleRegex = Regex("""^(\[[^]]+\])|^(\([^)]+\))|^(\{[^}]+\})|(\[[^]]+\])${'$'}|(\([^)]+\))${'$'}|(\{[^}]+\})${'$'}""")
+        private val shortenTitleRegex = Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
     }
 }
 

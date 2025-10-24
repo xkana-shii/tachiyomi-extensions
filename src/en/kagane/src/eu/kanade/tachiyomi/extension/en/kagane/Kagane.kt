@@ -6,11 +6,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.view.View
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebView
-import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.network.GET
@@ -27,11 +27,15 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -63,6 +67,41 @@ class Kagane : HttpSource(), ConfigurableSource {
     private val preferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
+        .cookieJar(
+            object : CookieJar {
+                private val cookieManager by lazy { CookieManager.getInstance() }
+
+                override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+                    val urlString = url.toString()
+                    cookies.forEach { cookieManager.setCookie(urlString, it.toString()) }
+                }
+
+                override fun loadForRequest(url: HttpUrl): List<Cookie> {
+                    val cookies = cookieManager.getCookie(url.toString()).orEmpty()
+                    val cookieList = mutableListOf<Cookie>()
+                    var hasNsfwCookie = false
+
+                    cookies.split(";").mapNotNullTo(cookieList) { c ->
+                        var cookieValue = c
+                        if (url.host == domain && c.contains("kagane_mature_content")) {
+                            hasNsfwCookie = true
+                            val (key, _) = c.split("=")
+                            cookieValue = "$key=${preferences.showNsfw}"
+                        }
+
+                        Cookie.parse(url, cookieValue)
+                    }
+
+                    if (!hasNsfwCookie && url.host == domain) {
+                        Cookie.parse(url, "kagane_mature_content=${preferences.showNsfw}")?.let {
+                            cookieList.add(it)
+                        }
+                    }
+
+                    return cookieList
+                }
+            },
+        )
         .addInterceptor(ImageInterceptor())
         .addInterceptor(::refreshTokenInterceptor)
         .rateLimit(2)
@@ -91,7 +130,6 @@ class Kagane : HttpSource(), ConfigurableSource {
                 throw IOException("Failed to retrieve token")
             }
             accessToken = challenge.accessToken
-            cacheUrl = challenge.cacheUrl
             response = chain.proceed(
                 request.newBuilder()
                     .url(url.newBuilder().setQueryParameter("token", accessToken).build())
@@ -108,13 +146,7 @@ class Kagane : HttpSource(), ConfigurableSource {
         searchMangaRequest(
             page,
             "",
-            FilterList(
-                SortFilter(Filter.Sort.Selection(1, false)),
-                ContentRatingFilter(
-                    preferences.contentRating.toSet(),
-                ),
-                ScanlationsFilter(),
-            ),
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(1, false))),
         )
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
@@ -125,13 +157,7 @@ class Kagane : HttpSource(), ConfigurableSource {
         searchMangaRequest(
             page,
             "",
-            FilterList(
-                SortFilter(Filter.Sort.Selection(2, false)),
-                ContentRatingFilter(
-                    preferences.contentRating.toSet(),
-                ),
-                ScanlationsFilter(),
-            ),
+            FilterList(SortFilter(getSortFilter(), Filter.Sort.Selection(2, false))),
         )
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
@@ -142,34 +168,69 @@ class Kagane : HttpSource(), ConfigurableSource {
         val body = buildJsonObject {
             filters.forEach { filter ->
                 when (filter) {
-                    is JsonFilter -> {
-                        filter.addToJsonObject(this)
+                    is SourceGroupFilter -> {
+                        if (filter.selected.isNotEmpty()) {
+                            putJsonArray("sources") { filter.selected.forEach { add(JsonPrimitive(it)) } }
+                        }
+                    }
+                    is GenreGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_genres",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
+                    }
+                    is TagGroupFilter -> {
+                        if (filter.included.isNotEmpty()) {
+                            put(
+                                "inclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.included.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", true)
+                                },
+                            )
+                        }
+                        if (filter.excluded.isNotEmpty()) {
+                            put(
+                                "exclusive_tags",
+                                buildJsonObject {
+                                    putJsonArray("values") { filter.excluded.forEach { add(JsonPrimitive(it)) } }
+                                    put("match_all", false)
+                                },
+                            )
+                        }
                     }
                     else -> {}
                 }
             }
-        }
-            .toJsonString()
-            .toRequestBody("application/json".toMediaType())
+        }.toJsonString().toRequestBody("application/json".toMediaType())
 
         val url = "$apiUrl/api/v1/search".toHttpUrl().newBuilder().apply {
             addQueryParameter("page", (page - 1).toString())
+            addQueryParameter("mature", preferences.showNsfw.toString())
             addQueryParameter("size", 35.toString()) // Default items per request
             if (query.isNotBlank()) {
                 addQueryParameter("name", query)
             }
             filters.forEach { filter ->
-                when (filter) {
-                    is SortFilter -> {
-                        filter.toUriPart().takeIf { it.isNotEmpty() }
-                            ?.let { uriPart -> addQueryParameter("sort", uriPart) }
+                if (filter is SortFilter) {
+                    val uriPart = filter.toUriPart()
+                    if (uriPart.isNotEmpty()) {
+                        addQueryParameter("sort", uriPart)
                     }
-
-                    is ScanlationsFilter -> {
-                        addQueryParameter("scanlations", filter.state.toString())
-                    }
-
-                    else -> {}
                 }
             }
         }
@@ -228,13 +289,12 @@ class Kagane : HttpSource(), ConfigurableSource {
 
         val challengeResp = getChallengeResponse(seriesId, chapterId)
         accessToken = challengeResp.accessToken
-        cacheUrl = challengeResp.cacheUrl
         if (preferences.dataSaver) {
             chapterId = chapterId + "_ds"
         }
 
         val pages = (0 until pageCount.toInt()).map { page ->
-            val pageUrl = "$cacheUrl/api/v1/books".toHttpUrl().newBuilder().apply {
+            val pageUrl = "$apiUrl/api/v1/books".toHttpUrl().newBuilder().apply {
                 addPathSegment(seriesId)
                 addPathSegment("file")
                 addPathSegment(chapterId)
@@ -248,7 +308,6 @@ class Kagane : HttpSource(), ConfigurableSource {
         return Observable.just(pages)
     }
 
-    private var cacheUrl = "https://kazana.$domain"
     private var accessToken: String = ""
     private fun getChallengeResponse(seriesId: String, chapterId: String): ChallengeDto {
         val f = "$seriesId:$chapterId".sha256().sliceArray(0 until 16)
@@ -409,26 +468,17 @@ class Kagane : HttpSource(), ConfigurableSource {
 
     // ============================ Preferences =============================
 
-    private val SharedPreferences.contentRating: List<String>
-        get() {
-            val maxRating = this.getString(CONTENT_RATING, CONTENT_RATING_DEFAULT)
-            val index = CONTENT_RATINGS.indexOfFirst { it == maxRating }
-            return CONTENT_RATINGS.slice(0..index.coerceAtLeast(0))
-        }
-
+    private val SharedPreferences.showNsfw
+        get() = this.getBoolean(SHOW_NSFW_KEY, true)
     private val SharedPreferences.dataSaver
         get() = this.getBoolean(DATA_SAVER, false)
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        ListPreference(screen.context).apply {
-            key = CONTENT_RATING
-            title = "Content Rating"
-            entries = CONTENT_RATINGS.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
-            entryValues = CONTENT_RATINGS
-            summary = "%s"
-            setDefaultValue(CONTENT_RATING_DEFAULT)
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_NSFW_KEY
+            title = "Show nsfw entries"
+            setDefaultValue(true)
         }.let(screen::addPreference)
-
         SwitchPreferenceCompat(screen.context).apply {
             key = DATA_SAVER
             title = "Data saver"
@@ -439,35 +489,78 @@ class Kagane : HttpSource(), ConfigurableSource {
     // ============================= Utilities ==============================
 
     companion object {
-        private const val CONTENT_RATING = "pref_content_rating"
-        private const val CONTENT_RATING_DEFAULT = "pornographic"
-        internal val CONTENT_RATINGS = arrayOf(
-            "safe",
-            "suggestive",
-            "erotica",
-            "pornographic",
-        )
-
+        private const val SHOW_NSFW_KEY = "pref_show_nsfw"
         private const val DATA_SAVER = "data_saver_default"
     }
 
     // ============================= Filters ==============================
 
-    private val scope = CoroutineScope(Dispatchers.IO)
-    private fun launchIO(block: () -> Unit) = scope.launch { block() }
+    private var cachedMetadata: MetadataDto? = null
+    private fun getMetadata(): MetadataDto {
+        cachedMetadata?.let { return it }
+        val response = client.newCall(GET("https://api.kagane.org/api/v1/metadata")).execute()
+        val json = response.body.string()
+        val metadata = Json.decodeFromString<MetadataDto>(json)
+        cachedMetadata = metadata
+        return metadata
+    }
+
+    class CheckboxFilterOption(val value: String, name: String = value, default: Boolean = false) : Filter.CheckBox(name, default)
+    class TriStateFilterOption(val value: String, name: String = value, default: Int = 0) : Filter.TriState(name, default)
+
+    class SourceGroupFilter(options: List<CheckboxFilterOption>) : Filter.Group<CheckboxFilterOption>("Source", options) {
+        val selected: List<String>
+            get() = state.filter { it.state }.map { it.value }
+    }
+    class GenreGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Genre", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+    class TagGroupFilter(options: List<TriStateFilterOption>) : Filter.Group<TriStateFilterOption>("Tag", options) {
+        val included: List<String>
+            get() = state.filter { it.isIncluded() }.map { it.value }
+        val excluded: List<String>
+            get() = state.filter { it.isExcluded() }.map { it.value }
+    }
+
+    class SelectFilterOption(val name: String, val value: String)
+
+    class SortFilter(
+        private val options: List<SelectFilterOption>,
+        selection: Selection = Selection(0, false),
+    ) : Filter.Sort(
+        "Sort By",
+        options.map { it.name }.toTypedArray(),
+        selection,
+    ) {
+        val selected: SelectFilterOption
+            get() = options[state!!.index]
+
+        fun toUriPart(): String {
+            val base = selected.value
+            val order = if (state!!.ascending) "" else ",desc"
+            return if (base.isNotEmpty()) base + order else ""
+        }
+    }
+
+    private fun getSortFilter() = listOf(
+        SelectFilterOption("Relevance", ""),
+        SelectFilterOption("Popular", "avg_views"),
+        SelectFilterOption("Latest", "updated_at"),
+        SelectFilterOption("By Name", "series_name"),
+        SelectFilterOption("Books count", "books_count"),
+        SelectFilterOption("Created at", "created_at"),
+    )
 
     override fun getFilterList(): FilterList {
-        launchIO { fetchMetadata(apiUrl, client) }
+        val metadata = getMetadata()
         return FilterList(
-            SortFilter(),
-            ContentRatingFilter(
-                preferences.contentRating.toSet(),
-            ),
-            GenresFilter(),
-            TagsFilter(),
-            SourcesFilter(),
-            Filter.Separator(),
-            ScanlationsFilter(),
+            SortFilter(getSortFilter()),
+            SourceGroupFilter(metadata.sources.map { CheckboxFilterOption(it.name) }),
+            GenreGroupFilter(metadata.genres.map { TriStateFilterOption(it.name) }),
+            TagGroupFilter(metadata.tags.map { TriStateFilterOption(it.name) }),
         )
     }
 }

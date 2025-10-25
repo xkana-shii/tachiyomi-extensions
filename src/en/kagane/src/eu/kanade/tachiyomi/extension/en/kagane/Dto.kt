@@ -101,6 +101,8 @@ class ChapterDto(
 class ChallengeDto(
     @SerialName("access_token")
     val accessToken: String,
+    @SerialName("cache_url")
+    val cacheUrl: String,
 )
 
 @Serializable

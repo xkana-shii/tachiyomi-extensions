@@ -45,12 +45,12 @@ import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.net.URLEncoder
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import kotlin.random.Random
-import java.net.URLEncoder
 
 open class BatoTo(
     final override val lang: String,
@@ -153,7 +153,6 @@ open class BatoTo(
 
     private fun maskApiKeySummary(key: String?): String {
         if (key.isNullOrBlank()) return "Not set"
-        // show first 2 and last 2 chars, mask the middle
         return if (key.length <= 6) "******" else "${key.take(2)}${"*".repeat(key.length - 4)}${key.takeLast(2)}"
     }
 
@@ -188,15 +187,9 @@ open class BatoTo(
     private fun customRemoveTitle(): String =
         preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
 
-    // MangaBaka API Key helpers
     private fun getMangaBakaApiKey(): String =
         preferences.getString("${MANGABAKA_API_KEY_PREF}_$lang", "")!!
 
-    /**
-     * Helper to create a MangaBakaApi configured with this source's network client, json instance,
-     * and the stored API key (if set). Callers can use this to interact with MangaBaka while using
-     * the saved key from settings.
-     */
     @Suppress("unused")
     fun createMangaBakaApi(apiBase: String = "https://api.mangabaka.dev"): MangaBakaApi {
         val key = getMangaBakaApiKey().takeIf { it.isNotBlank() }
@@ -231,7 +224,6 @@ open class BatoTo(
         val manga = SManga.create()
         val item = element.select("a.item-cover")
         val imgurl = item.select("img").attr("abs:src")
-        // set url directly instead of setUrlWithoutDomain to avoid unresolved reference
         manga.url = stripSeriesUrl(item.attr("href"))
         manga.title = element.select("a.item-title").text().removeEntities()
             .cleanTitleIfNeeded()
@@ -362,7 +354,6 @@ open class BatoTo(
             .cleanTitleIfNeeded()
         manga.thumbnail_url = document.select("div.attr-cover img")
             .attr("abs:src")
-        // set url directly to avoid unresolved setUrlWithoutDomain
         manga.url = stripSeriesUrl(infoElement.select("h3 a").attr("abs:href"))
         return MangasPage(listOf(manga), false)
     }
@@ -394,7 +385,6 @@ open class BatoTo(
 
     private fun searchUtilsFromElement(element: Element): SManga {
         val manga = SManga.create()
-        // set url directly instead of setUrlWithoutDomain
         manga.url = stripSeriesUrl(element.select("td a").attr("href"))
         manga.title = element.select("td a").text()
             .cleanTitleIfNeeded()
@@ -404,7 +394,6 @@ open class BatoTo(
 
     private fun searchHistoryFromElement(element: Element): SManga {
         val manga = SManga.create()
-        // set url directly instead of setUrlWithoutDomain
         manga.url = stripSeriesUrl(element.select(".position-relative a").attr("href"))
         manga.title = element.select(".position-relative a").text()
             .cleanTitleIfNeeded()
@@ -426,7 +415,6 @@ open class BatoTo(
 
     override fun mangaDetailsRequest(manga: SManga): Request {
         if (manga.url.startsWith("http")) {
-            // Check if trying to use a deprecated mirror, force current mirror
             val httpUrl = manga.url.toHttpUrl()
             if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
                 val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)
@@ -483,7 +471,6 @@ open class BatoTo(
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
         manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
-        // set url directly instead of setUrlWithoutDomain
         manga.url = stripSeriesUrl(infoElement.select("h3 a").attr("abs:href"))
         return manga
     }
@@ -550,7 +537,6 @@ open class BatoTo(
         return Jsoup.parse(response.body.string(), response.request.url.toString(), Parser.xmlParser())
             .select("channel > item").map { item ->
                 SChapter.create().apply {
-                    // set url directly instead of setUrlWithoutDomain
                     url = item.selectFirst("guid")!!.text()
                     name = item.selectFirst("title")!!.text()
                     date_upload = parseAltChapterDate(item.selectFirst("pubDate")!!.text())
@@ -577,7 +563,6 @@ open class BatoTo(
         return if (getAltChapterListPref() && !id.isNullOrBlank()) {
             GET("$baseUrl/rss/series/$id.xml", headers)
         } else if (manga.url.startsWith("http")) {
-            // Check if trying to use a deprecated mirror, force current mirror
             val httpUrl = manga.url.toHttpUrl()
             if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
                 val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)

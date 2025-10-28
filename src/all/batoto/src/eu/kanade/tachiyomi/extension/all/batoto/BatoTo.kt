@@ -34,6 +34,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
@@ -44,6 +45,7 @@ import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.net.URLEncoder
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -128,10 +130,29 @@ open class BatoTo(
                 isValid
             }
         }
+
+        val mangaBakaApiKeyPref = EditTextPreference(screen.context).apply {
+            key = "${MANGABAKA_API_KEY_PREF}_$lang"
+            title = "MangaBaka API Key"
+            summary = maskApiKeySummary(getMangaBakaApiKey())
+            setDefaultValue("")
+            setOnPreferenceChangeListener { _, newValue ->
+                val newKey = (newValue as? String) ?: ""
+                summary = maskApiKeySummary(newKey)
+                true
+            }
+        }
+
         screen.addPreference(mirrorPref)
         screen.addPreference(altChapterListPref)
         screen.addPreference(removeOfficialPref)
         screen.addPreference(removeCustomPref)
+        screen.addPreference(mangaBakaApiKeyPref)
+    }
+
+    private fun maskApiKeySummary(key: String?): String {
+        if (key.isNullOrBlank()) return "Not set"
+        return if (key.length <= 6) "******" else "${key.take(2)}${"*".repeat(key.length - 4)}${key.takeLast(2)}"
     }
 
     private fun getMirrorPref(): String {
@@ -165,6 +186,15 @@ open class BatoTo(
     private fun customRemoveTitle(): String =
         preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
 
+    private fun getMangaBakaApiKey(): String =
+        preferences.getString("${MANGABAKA_API_KEY_PREF}_$lang", "")!!
+
+    @Suppress("unused")
+    fun createMangaBakaApi(apiBase: String = "https://api.mangabaka.dev"): MangaBakaApi {
+        val key = getMangaBakaApiKey().takeIf { it.isNotBlank() }
+        return MangaBakaApi(client, json, apiBase = apiBase, apiKey = key)
+    }
+
     private fun SharedPreferences.migrateMirrorPref() {
         val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
 
@@ -193,7 +223,7 @@ open class BatoTo(
         val manga = SManga.create()
         val item = element.select("a.item-cover")
         val imgurl = item.select("img").attr("abs:src")
-        manga.setUrlWithoutDomain(stripSeriesUrl(item.attr("href")))
+        manga.url = stripSeriesUrl(item.attr("href"))
         manga.title = element.select("a.item-title").text().removeEntities()
             .cleanTitleIfNeeded()
         manga.thumbnail_url = imgurl
@@ -323,7 +353,7 @@ open class BatoTo(
             .cleanTitleIfNeeded()
         manga.thumbnail_url = document.select("div.attr-cover img")
             .attr("abs:src")
-        manga.setUrlWithoutDomain(stripSeriesUrl(infoElement.select("h3 a").attr("abs:href")))
+        manga.url = stripSeriesUrl(infoElement.select("h3 a").attr("abs:href"))
         return MangasPage(listOf(manga), false)
     }
 
@@ -354,7 +384,7 @@ open class BatoTo(
 
     private fun searchUtilsFromElement(element: Element): SManga {
         val manga = SManga.create()
-        manga.setUrlWithoutDomain(stripSeriesUrl(element.select("td a").attr("href")))
+        manga.url = stripSeriesUrl(element.select("td a").attr("href"))
         manga.title = element.select("td a").text()
             .cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
@@ -363,7 +393,7 @@ open class BatoTo(
 
     private fun searchHistoryFromElement(element: Element): SManga {
         val manga = SManga.create()
-        manga.setUrlWithoutDomain(stripSeriesUrl(element.select(".position-relative a").attr("href")))
+        manga.url = stripSeriesUrl(element.select(".position-relative a").attr("href"))
         manga.title = element.select(".position-relative a").text()
             .cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
@@ -441,6 +471,7 @@ open class BatoTo(
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
         manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
+        manga.url = stripSeriesUrl(infoElement.select("h3 a").attr("abs:href"))
         return manga
     }
 
@@ -506,7 +537,7 @@ open class BatoTo(
         return Jsoup.parse(response.body.string(), response.request.url.toString(), Parser.xmlParser())
             .select("channel > item").map { item ->
                 SChapter.create().apply {
-                    setUrlWithoutDomain(item.selectFirst("guid")!!.text())
+                    url = item.selectFirst("guid")!!.text()
                     name = item.selectFirst("title")!!.text()
                     date_upload = parseAltChapterDate(item.selectFirst("pubDate")!!.text())
                 }
@@ -567,7 +598,7 @@ open class BatoTo(
         val group = element.select("div.extra > a:not(.ps-3)").text()
         val user = element.select("div.extra > a.ps-3").text()
         val time = element.select("div.extra > i.ps-3").text()
-        chapter.setUrlWithoutDomain(urlElement.attr("href"))
+        chapter.url = urlElement.attr("href")
         chapter.name = urlElement.text()
         chapter.scanlator = when {
             group.isNotBlank() -> group
@@ -1231,5 +1262,89 @@ open class BatoTo(
 
         private val titleRegex: Regex =
             Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
+
+        private const val MANGABAKA_API_KEY_PREF = "MANGABAKA_API_KEY"
     }
+}
+
+class MangaBakaApi(
+    private val client: OkHttpClient,
+    private val json: Json,
+    private val apiBase: String = "https://api.mangabaka.dev",
+    private val apiKey: String? = null,
+) {
+
+    @Suppress("unused")
+    fun getSeriesById(id: Int): SManga? {
+        val url = "$apiBase/v1/series/$id"
+        val requestBuilder = Request.Builder().url(url).get()
+        if (!apiKey.isNullOrBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+        }
+        val request = requestBuilder.build()
+        client.newCall(request).execute().use { resp ->
+            val body = resp.body?.string() ?: return null
+            return try {
+                val root = json.parseToJsonElement(body).jsonObject
+                val status = root["status"]?.jsonPrimitive?.intOrNull ?: resp.code
+                if (status != 200) return null
+                val data = root["data"]?.jsonObject ?: return null
+                parseSeriesDataToSManga(data)
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    @Suppress("unused")
+    fun searchSeries(query: String, page: Int = 1, limit: Int = 10): List<SManga> {
+        val encoded = URLEncoder.encode(query, "UTF-8")
+        val url = "$apiBase/v1/series/search?q=$encoded&page=$page&limit=$limit"
+        val requestBuilder = Request.Builder().url(url).get()
+        if (!apiKey.isNullOrBlank()) {
+            requestBuilder.addHeader("Authorization", "Bearer $apiKey")
+        }
+        val request = requestBuilder.build()
+        client.newCall(request).execute().use { resp ->
+            val body = resp.body?.string() ?: return emptyList()
+            return try {
+                val root = json.parseToJsonElement(body).jsonObject
+                val status = root["status"]?.jsonPrimitive?.intOrNull ?: resp.code
+                if (status != 200) return emptyList()
+                val dataArray = root["data"]?.jsonArray ?: return emptyList()
+                dataArray.mapNotNull { elem ->
+                    runCatching {
+                        val data = elem.jsonObject
+                        parseSeriesDataToSManga(data)
+                    }.getOrNull()
+                }
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+    }
+
+    private fun parseSeriesDataToSManga(data: JsonObject): SManga {
+        val manga = SManga.create()
+        val id = data["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+        val title = data["title"]?.jsonPrimitive?.contentOrNull ?: ""
+        val description = data["description"]?.jsonPrimitive?.contentOrNull
+        val coverRaw = data["cover"]?.jsonObject?.get("raw")?.jsonPrimitive?.contentOrNull
+            ?: data["cover"]?.jsonObject?.get("default")?.jsonPrimitive?.contentOrNull
+        manga.title = title
+        manga.description = description
+        manga.thumbnail_url = coverRaw
+        if (id != null) {
+            manga.url = "/series/$id"
+        } else {
+            manga.url = ""
+        }
+        return manga
+    }
+
+    private val kotlinx.serialization.json.JsonPrimitive.contentOrNull: String?
+        get() = runCatching { this.content }.getOrNull()
+
+    private val kotlinx.serialization.json.JsonPrimitive.intOrNull: Int?
+        get() = this.contentOrNull?.toIntOrNull()
 }

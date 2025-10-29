@@ -444,7 +444,7 @@ open class BatoTo(
         if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
         cleanedTitle = cleanedTitle.trim()
 
-        val description = buildString {
+        val baseDescription = buildString {
             infoElement.selectFirst("h5:containsOwn(Summary:) + div #limit-height-ctrl-summary #limit-height-body-summary .limit-html")?.also {
                 append("\n\n----\n#### **Summary**\n${it.wholeText()}")
             }
@@ -462,7 +462,13 @@ open class BatoTo(
                 append("\n\n----\n#### **Removed From Title**\n")
                 removedParts.forEach { append("- `$it`\n") }
             }
-        }.trim().let { desc -> autoMarkdownLinks(desc) }
+        }.trim()
+
+        val mangaBakaInfo = buildString {
+            append("\n\n----\n#### **MangaBaka**\n")
+        }
+
+        val description = autoMarkdownLinks((baseDescription + mangaBakaInfo).trim())
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()

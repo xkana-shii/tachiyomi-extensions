@@ -464,11 +464,37 @@ open class BatoTo(
             }
         }.trim()
 
-        val mangaBakaInfo = buildString {
-            append("\n\n----\n#### **MangaBaka**\n")
-        }
+        // Build MangaBaka links section by searching MangaBaka for the cleaned title.
+        // This will append a small "MangaBaka" section with tracker links if any matches are found.
+        val mangaBakaLinksSection = buildString {
+            try {
+                // createMangaBakaApi uses the saved API key if present; MangaBakaApi supports anonymous requests too.
+                val api = createMangaBakaApi()
+                val results = api.searchSeries(cleanedTitle, page = 1, limit = 3)
+                if (results.isNotEmpty()) {
+                    append("\n\n----\n#### **MangaBaka**\n")
+                    // Use the mangabaka.dev web host for links
+                    val webBase = "https://mangabaka.dev"
+                    results.forEach { res ->
+                        // res.url is expected to be like "/series/{id}"
+                        val path = res.url ?: ""
+                        if (path.isNotBlank()) {
+                            // Escape title for markdown link text
+                            val titleText = res.title.replace("[", "\\[").replace("]", "\\]")
+                            append("- [$titleText]($webBase$path)\n")
+                        } else if (!res.thumbnail_url.isNullOrBlank()) {
+                            // fallback: show title only if url missing
+                            val titleText = res.title.replace("[", "\\[").replace("]", "\\]")
+                            append("- $titleText\n")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // network or parse error: don't fail parsing manga details, just omit MangaBaka section
+            }
+        }.trim()
 
-        val description = autoMarkdownLinks((baseDescription + mangaBakaInfo).trim())
+        val description = autoMarkdownLinks((baseDescription + (if (mangaBakaLinksSection.isNotEmpty()) "\n\n$mangaBakaLinksSection" else "")).trim())
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
@@ -1273,6 +1299,16 @@ open class BatoTo(
     }
 }
 
+/**
+ * Minimal MangaBaka API client to fetch series/search from MangaBaka v1 API.
+ *
+ * This is a lightweight implementation intended to coexist with the Batoto implementation above.
+ * It uses OkHttp + kotlinx.serialization.json.Json to perform requests and return minimal SManga objects
+ * This is not a full OpenAPI-codegen client — it's a practical helper for typical tasks
+ * (get series by id, search by query).
+ *
+ * Author: added inline per user request.
+ */
 class MangaBakaApi(
     private val client: OkHttpClient,
     private val json: Json,

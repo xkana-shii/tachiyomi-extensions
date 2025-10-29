@@ -1,5 +1,5 @@
 ext {
-    kmkVersionCode = 16
+    kmkVersionCode = 17
     extName = 'Bato.to'
     extClass = '.BatoToFactory'
     extVersionCode = 56

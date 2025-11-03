@@ -31,7 +31,7 @@ private val languageList = listOf(
 //    Source("hi", "Hindi"),
     Source("hu", "Hungarian"),
     Source("it", "Italian"),
-    Source("jp", "Japanese", "ja"),
+    Source("ja", "Japanese", "jp"),
     Source("ko", "Korean"),
     Source("lt", "Lithuanian"),
 //    Source("ms", "Malay"),

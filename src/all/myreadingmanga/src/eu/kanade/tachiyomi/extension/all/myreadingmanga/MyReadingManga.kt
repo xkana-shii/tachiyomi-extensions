@@ -139,9 +139,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         cacheAssistant()
         return searchMangaParse(response)
     }
-    override fun popularMangaNextPageSelector() = throw UnsupportedOperationException()
-    override fun popularMangaSelector() = throw UnsupportedOperationException()
-    override fun popularMangaFromElement(element: Element) = throw UnsupportedOperationException()
+    override fun popularMangaNextPageSelector() = "li.pagination-next"
+    override fun popularMangaSelector() = "article:not(.category-video)"
+    override fun popularMangaFromElement(element: Element) = buildManga(element.select("a[rel]").first()!!, element.select("a.entry-image-link img").first())
 
     // Latest
     @SuppressLint("DefaultLocale")

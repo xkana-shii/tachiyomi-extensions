@@ -377,6 +377,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".tag-groups-alphabetical-index a")),
             PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".tag-groups-alphabetical-index a")),
             ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".tag-groups-alphabetical-index a")),
+            ArtistsFilter(returnFilter(cachedPagesUrls["artists"]!!, ".tag-groups-alphabetical-index a")),
+            StatusFilter(),
         )
     }
 
@@ -392,6 +394,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     private class CatFilter(catIds: Array<Pair<String, String>>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf(Pair("Any", ""), *catIds))
     private class PairingFilter(pairs: Array<Pair<String, String>>) : UriSelectFilter("Pairing", "ep_filter_pairing", arrayOf(Pair("Any", ""), *pairs))
     private class ScanGroupFilter(groups: Array<Pair<String, String>>) : UriSelectFilter("Scanlation Group", "ep_filter_group", arrayOf(Pair("Any", ""), *groups))
+    private class ArtistsFilter(artists: Array<Pair<String, String>>) : UriSelectFilter("Artists", "ep_filter_artist", arrayOf(Pair("Any", ""), *artists))
+    private class StatusFilter : UriSelectFilter("Status", "ep_filter_status", arrayOf(Pair("Any", ""), Pair("Completed", "completed"), Pair("Ongoing", "ongoing"), Pair("Licensed", "licensed"), Pair("Dropped", "dropped"), Pair("Hiatus", "hiatus"), Pair("Discontinued", "discontinued")))
     private class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
     /**

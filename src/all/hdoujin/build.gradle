@@ -1,7 +1,6 @@
 ext {
-    kmkVersionCode = 1
-    extName = 'HangTruyen'
-    extClass = '.HangTruyen'
+    extName = 'HDoujin'
+    extClass = '.HDoujinFactory'
     extVersionCode = 1
     isNsfw = true
 }

@@ -59,10 +59,7 @@ abstract class EHentai(
 
     private var lastMangaId = ""
 
-    private var displayFullTitle: Boolean = when (preferences.getString("${TITLE_PREF}_$lang", "full")) {
-        "full" -> true
-        else -> false
-    }
+    private val displayFullTitle: Boolean = false
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
@@ -262,7 +259,9 @@ abstract class EHentai(
                 if (displayFullTitle) it else it.shortenTitle()
             }
 
-            altTitle = select("#gj").text().nullIfBlank()?.trim()
+            altTitle = select("#gj").text().nullIfBlank()?.trim()?.let {
+                it.shortenTitle()
+            }
 
             // Thumbnail is set as background of element in style attribute
             thumbnailUrl = select("#gd1 div").attr("style").nullIfBlank()?.let {
@@ -632,7 +631,6 @@ abstract class EHentai(
         private const val FORCE_EH_SUMMARY = "Force e-hentai to avoid content on exhentai"
         private const val FORCE_EH_DEFAULT_VALUE = true
 
-        private const val TITLE_PREF = "Display manga title as:"
     }
 
     // Preferences
@@ -676,23 +674,6 @@ abstract class EHentai(
             setDefaultValue(IGNEOUS_PREF_DEFAULT_VALUE)
         }
 
-        val titlePref = ListPreference(screen.context).apply {
-            key = "${TITLE_PREF}_$lang"
-            title = TITLE_PREF
-            entries = arrayOf("Full Title", "Short Title")
-            entryValues = arrayOf("full", "short")
-            summary = "%s"
-            setDefaultValue("short")
-            setOnPreferenceChangeListener { _, newValue ->
-                displayFullTitle = when (newValue) {
-                    "full" -> true
-                    else -> false
-                }
-                true
-            }
-        }
-
-        screen.addPreference(titlePref)
         screen.addPreference(forceEhPref)
         screen.addPreference(memberIdPref)
         screen.addPreference(passHashPref)

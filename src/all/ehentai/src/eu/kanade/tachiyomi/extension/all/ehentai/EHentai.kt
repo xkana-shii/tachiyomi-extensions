@@ -6,7 +6,6 @@ import android.net.Uri
 import android.webkit.CookieManager
 import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
-import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -630,7 +629,6 @@ abstract class EHentai(
         private const val FORCE_EH_TITLE = "Force e-hentai"
         private const val FORCE_EH_SUMMARY = "Force e-hentai to avoid content on exhentai"
         private const val FORCE_EH_DEFAULT_VALUE = true
-
     }
 
     // Preferences

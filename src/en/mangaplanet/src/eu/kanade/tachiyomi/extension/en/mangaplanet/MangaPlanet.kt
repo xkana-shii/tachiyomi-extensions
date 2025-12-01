@@ -46,21 +46,49 @@ class MangaPlanet : ConfigurableSource, ParsedHttpSource() {
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
+    // Helper to fetch JP title from manga's details page
+    private fun getJapaneseTitle(mangaUrl: String): String? {
+        return try {
+            val url = baseUrl + mangaUrl
+            val response = client.newCall(GET(url, headers)).execute()
+            val document = response.body?.let { org.jsoup.Jsoup.parse(it.string()) }
+            val alternativeTitlesElement = document?.selectFirst("h3#manga_title + p")
+            val alternativeTitles = alternativeTitlesElement?.textNodes()
+                ?.filterNot { it.isBlank() }.orEmpty()
+            alternativeTitles.getOrNull(1)?.text()?.trim()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/browse/title?ttlpage=$page", headers)
 
     override fun popularMangaSelector() = ".book-list"
 
-    override fun popularMangaFromElement(element: Element) = SManga.create().apply {
-        setUrlWithoutDomain(element.selectFirst("a")!!.attr("href"))
-        title = element.selectFirst("h3")!!.text()
-        author = element.selectFirst("p:has(.fa-pen-nib)")?.text()
-        description = element.selectFirst("h3 + p")?.text()
-        thumbnail_url = element.selectFirst("img")?.absUrl("data-src")
-        status = when {
-            element.selectFirst(".fa-flag-alt") != null -> SManga.COMPLETED
-            element.selectFirst(".fa-arrow-right") != null -> SManga.ONGOING
-            else -> SManga.UNKNOWN
+    override fun popularMangaFromElement(element: Element): SManga {
+        val relativeUrl = element.selectFirst("a")!!.attr("href")
+        val manga = SManga.create().apply {
+            setUrlWithoutDomain(relativeUrl)
+            author = element.selectFirst("p:has(.fa-pen-nib)")?.text()
+            description = element.selectFirst("h3 + p")?.text()
+            thumbnail_url = element.selectFirst("img")?.absUrl("data-src")
+            status = when {
+                element.selectFirst(".fa-flag-alt") != null -> SManga.COMPLETED
+                element.selectFirst(".fa-arrow-right") != null -> SManga.ONGOING
+                else -> SManga.UNKNOWN
+            }
         }
+
+        val useJapaneseTitles = preferences.getBoolean("useJapaneseTitles", false)
+        if (useJapaneseTitles) {
+            val jpTitle = getJapaneseTitle(relativeUrl)
+            manga.title = jpTitle?.takeIf { it.isNotEmpty() }
+                ?: element.selectFirst("h3")!!.text()
+        } else {
+            manga.title = element.selectFirst("h3")!!.text()
+        }
+
+        return manga
     }
 
     override fun popularMangaNextPageSelector() = "ul.pagination a.page-link[rel=next]"
@@ -96,7 +124,10 @@ class MangaPlanet : ConfigurableSource, ParsedHttpSource() {
 
     override fun searchMangaSelector() = popularMangaSelector()
 
-    override fun searchMangaFromElement(element: Element) = popularMangaFromElement(element)
+    override fun searchMangaFromElement(element: Element): SManga {
+        // Reuse popularMangaFromElement so logic is always consistent
+        return popularMangaFromElement(element)
+    }
 
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 

@@ -175,7 +175,9 @@ open class BatoTo(
 
     override val supportsLatest = true
     private val json: Json by injectLazy()
-    override val client = network.cloudflareClient
+    override val client = network.cloudflareClient.newBuilder().apply {
+        addInterceptor(::imageFallbackInterceptor)
+    }.build()
 
     override fun latestUpdatesRequest(page: Int): Request {
         return GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
@@ -660,13 +662,66 @@ open class BatoTo(
 
         return imageUrls.mapIndexed { i, it ->
             val acc = imgAccList.getOrNull(i)
-            val url = if (acc != null) {
-                "$it?$acc"
+            val finalUrl = if (acc != null) {
+                if (it.contains("?")) "$it&$acc" else "$it?$acc"
             } else {
                 it
             }
+            Page(i, imageUrl = finalUrl)
+        }
+    }
 
-            Page(i, imageUrl = url)
+    private fun imageFallbackInterceptor(chain: okhttp3.Interceptor.Chain): Response {
+        val request = chain.request()
+        val urlString = request.url.toString()
+        val host = request.url.host
+
+        var response: Response? = null
+        try {
+            response = chain.proceed(request)
+            if (response.isSuccessful) return response
+        } catch (_: Exception) {
+        }
+
+        if (!host.startsWith("k")) {
+            return response ?: chain.proceed(request)
+        }
+
+        try { response?.close() } catch (_: Exception) {}
+
+        val fallback1 = urlString.replaceFirst(Regex("://k"), "://n")
+        val fallback2 = urlString.replaceFirst(Regex("(^|://)k"), "$1n")
+
+        val candidates = listOfNotNull(
+            fallback1.takeIf { it != urlString },
+            fallback2.takeIf { it != urlString && it != fallback1 },
+        )
+
+        for (newUrl in candidates) {
+            if (newUrl == urlString) continue
+
+            val newRequest = request.newBuilder()
+                .url(newUrl)
+                .build()
+
+            try {
+                val newResponse = chain
+                    .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                    .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                    .proceed(newRequest)
+
+                if (newResponse.isSuccessful) {
+                    return newResponse
+                }
+                newResponse.close()
+            } catch (_: Exception) {
+            }
+        }
+
+        return try {
+            chain.proceed(request)
+        } catch (e: Exception) {
+            throw e
         }
     }
 

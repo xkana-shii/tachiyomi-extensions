@@ -660,16 +660,13 @@ open class BatoTo(
 
         return imageUrls.mapIndexed { i, it ->
             val acc = imgAccList.getOrNull(i)
-            val imageUrl = if (acc != null) {
+            val url = if (acc != null) {
                 "$it?$acc"
             } else {
                 it
             }
 
-            val fallbackUrl = imageUrl.replace(Regex("""(https?:\/\/)k(\d\d)\.mbrtz\.com"""), "$1n$2.mbrtz.com")
-            val urlWithFallback = "$imageUrl|FALLBACK|$fallbackUrl"
-
-            Page(i, url = urlWithFallback, imageUrl = imageUrl)
+            Page(i, imageUrl = url)
         }
     }
 

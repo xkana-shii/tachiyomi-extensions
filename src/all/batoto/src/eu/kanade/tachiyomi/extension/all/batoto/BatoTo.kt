@@ -1164,7 +1164,7 @@ open class BatoTo(
             val servers = listOf(
                 "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
                 "k05", "k07",
-                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
+                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11"
             )
 
             for (server in servers) {
@@ -1178,8 +1178,8 @@ open class BatoTo(
 
                 try {
                     val newResponse = chain
-                        .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                        .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .withConnectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
+                        .withReadTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
                         .proceed(newRequest)
 
                     if (newResponse.isSuccessful) {

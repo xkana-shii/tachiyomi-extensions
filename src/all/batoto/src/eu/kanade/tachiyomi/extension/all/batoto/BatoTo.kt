@@ -50,6 +50,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import kotlin.random.Random
+import kotlin.text.Regex
 
 open class BatoTo(
     final override val lang: String,
@@ -176,9 +177,10 @@ open class BatoTo(
 
     override val supportsLatest = true
     private val json: Json by injectLazy()
-    override val client = network.cloudflareClient.newBuilder()
-        .addInterceptor(::imageFallbackInterceptor)
-        .build()
+
+    override val client = network.cloudflareClient.newBuilder().apply {
+        addInterceptor(::imageFallbackInterceptor)
+    }.build()
 
     override fun latestUpdatesRequest(page: Int): Request {
         return GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
@@ -663,26 +665,13 @@ open class BatoTo(
 
         return imageUrls.mapIndexed { i, it ->
             val acc = imgAccList.getOrNull(i)
-
-            var url = it
-            try {
-                val httpUrl = it.toHttpUrl()
-                val host = httpUrl.host
-                if (host.startsWith("k") && host.endsWith(".mbrtz.com")) {
-                    val newHost = host.replaceFirstChar { 'n' }
-                    url = httpUrl.newBuilder().host(newHost).build().toString()
-                }
-            } catch (_: Exception) {
-                // If parsing fails, leave the original URL untouched
-            }
-
-            val finalUrl = if (acc != null) {
-                "$url?$acc"
+            val url = if (acc != null) {
+                "$it?$acc"
             } else {
-                url
+                it
             }
 
-            Page(i, imageUrl = finalUrl)
+            Page(i, imageUrl = url)
         }
     }
 
@@ -701,6 +690,56 @@ open class BatoTo(
             tempTitle = tempTitle.replace(titleRegex, "")
         }
         return tempTitle.trim()
+    }
+
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+
+        if (response.isSuccessful) return response
+
+        val urlString = request.url.toString()
+
+        // We know the first attempt failed. Close the response body to release the
+        // connection from the pool and prevent resource leaks before we start the retry loop.
+        // This is critical; otherwise, new requests in the loop may hang or fail.
+        response.close()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            // Sorted list: Most reliable servers FIRST
+            val servers = listOf("k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09", "n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10")
+
+            for (server in servers) {
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                // Skip if we are about to try the exact same URL that just failed
+                if (newUrl == urlString) continue
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    // FORCE SHORT TIMEOUTS FOR FALLBACKS
+                    // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
+                    val newResponse = chain
+                        .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                        .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+                    // If this server also failed, close and loop to the next one
+                    newResponse.close()
+                } catch (e: Exception) {
+                    // Connection error on this mirror, ignore and loop to next
+                }
+            }
+        }
+
+        // If everything failed, re-run original request to return the standard error
+        return chain.proceed(request)
     }
 
     override fun getFilterList() = FilterList(
@@ -1143,8 +1182,10 @@ open class BatoTo(
         CheckboxFilterOption("sl", "Slovenian"),
         CheckboxFilterOption("so", "Somali"),
         CheckboxFilterOption("sw", "Swahili"),
+        CheckboxFilterOption("sv", "Swedish"),
         CheckboxFilterOption("tg", "Tajik"),
         CheckboxFilterOption("ta", "Tamil"),
+        CheckboxFilterOption("th", "Thai"),
         CheckboxFilterOption("ti", "Tigrinya"),
         CheckboxFilterOption("to", "Tonga"),
         CheckboxFilterOption("tk", "Turkmen"),
@@ -1163,51 +1204,8 @@ open class BatoTo(
         return matchResult?.groups?.get(1)?.value ?: url
     }
 
-    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        var response = chain.proceed(request)
-
-        if (response.isSuccessful) return response
-
-        val urlString = request.url.toString()
-
-        if (SERVER_PATTERN.containsMatchIn(urlString)) {
-            response.close()
-
-            val servers = listOf(
-                "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
-                "k05", "k07",
-                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
-            )
-
-            for (server in servers) {
-                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-
-                if (newUrl == urlString) continue
-
-                val newRequest = request.newBuilder()
-                    .url(newUrl)
-                    .build()
-
-                try {
-                    val newResponse = chain
-                        .withConnectTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
-                        .withReadTimeout(2, java.util.concurrent.TimeUnit.SECONDS)
-                        .proceed(newRequest)
-
-                    if (newResponse.isSuccessful) {
-                        return newResponse
-                    }
-                    newResponse.close()
-                } catch (e: Exception) {
-                }
-            }
-        }
-
-        return chain.proceed(request)
-    }
-
     companion object {
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
         private val seriesUrlRegex = Regex("""(.*/series/\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"

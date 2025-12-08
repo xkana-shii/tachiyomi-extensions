@@ -34,6 +34,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
@@ -175,9 +176,9 @@ open class BatoTo(
 
     override val supportsLatest = true
     private val json: Json by injectLazy()
-    override val client = network.cloudflareClient.newBuilder().apply {
-        addInterceptor(::imageFallbackInterceptor)
-    }.build()
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .build()
 
     override fun latestUpdatesRequest(page: Int): Request {
         return GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
@@ -447,7 +448,7 @@ open class BatoTo(
     }
 
     private fun autoMarkdownLinks(input: String): String {
-        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?[a-zA-Z0-9.-]+\.[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
         return urlRegex.replace(input) { matchResult ->
             val url = matchResult.value
             val start = matchResult.range.first
@@ -662,66 +663,13 @@ open class BatoTo(
 
         return imageUrls.mapIndexed { i, it ->
             val acc = imgAccList.getOrNull(i)
-            val finalUrl = if (acc != null) {
-                if (it.contains("?")) "$it&$acc" else "$it?$acc"
+            val url = if (acc != null) {
+                "$it?$acc"
             } else {
                 it
             }
-            Page(i, imageUrl = finalUrl)
-        }
-    }
 
-    private fun imageFallbackInterceptor(chain: okhttp3.Interceptor.Chain): Response {
-        val request = chain.request()
-        val urlString = request.url.toString()
-        val host = request.url.host
-
-        var response: Response? = null
-        try {
-            response = chain.proceed(request)
-            if (response.isSuccessful) return response
-        } catch (_: Exception) {
-        }
-
-        if (!host.startsWith("k")) {
-            return response ?: chain.proceed(request)
-        }
-
-        try { response?.close() } catch (_: Exception) {}
-
-        val fallback1 = urlString.replaceFirst(Regex("://k"), "://n")
-        val fallback2 = urlString.replaceFirst(Regex("(^|://)k"), "$1n")
-
-        val candidates = listOfNotNull(
-            fallback1.takeIf { it != urlString },
-            fallback2.takeIf { it != urlString && it != fallback1 },
-        )
-
-        for (newUrl in candidates) {
-            if (newUrl == urlString) continue
-
-            val newRequest = request.newBuilder()
-                .url(newUrl)
-                .build()
-
-            try {
-                val newResponse = chain
-                    .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                    .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                    .proceed(newRequest)
-
-                if (newResponse.isSuccessful) {
-                    return newResponse
-                }
-                newResponse.close()
-            } catch (_: Exception) {
-            }
-        }
-
-        return try {
-            chain.proceed(request)
-        } catch (e: Exception) {
-            throw e
+            Page(i, imageUrl = url)
         }
     }
 
@@ -1202,6 +1150,50 @@ open class BatoTo(
         return matchResult?.groups?.get(1)?.value ?: url
     }
 
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        var response = chain.proceed(request)
+
+        if (response.isSuccessful) return response
+
+        val urlString = request.url.toString()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            response.close()
+
+            val servers = listOf(
+                "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
+                "k05", "k07",
+                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
+            )
+
+            for (server in servers) {
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                if (newUrl == urlString) continue
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    val newResponse = chain
+                        .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                        .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+                    newResponse.close()
+                } catch (e: Exception) {
+                }
+            }
+        }
+
+        return chain.proceed(request)
+    }
+
     companion object {
         private val seriesUrlRegex = Regex("""(.*/series/\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
@@ -1286,5 +1278,7 @@ open class BatoTo(
 
         private val titleRegex: Regex =
             Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
+
+        private val SERVER_PATTERN = Regex("https://[kn]\\d{2}")
     }
 }

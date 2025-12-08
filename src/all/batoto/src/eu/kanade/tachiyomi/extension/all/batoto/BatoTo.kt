@@ -663,13 +663,26 @@ open class BatoTo(
 
         return imageUrls.mapIndexed { i, it ->
             val acc = imgAccList.getOrNull(i)
-            val url = if (acc != null) {
-                "$it?$acc"
-            } else {
-                it
+
+            var url = it
+            try {
+                val httpUrl = it.toHttpUrl()
+                val host = httpUrl.host
+                if (host.startsWith("k") && host.endsWith(".mbrtz.com")) {
+                    val newHost = host.replaceFirstChar { 'n' }
+                    url = httpUrl.newBuilder().host(newHost).build().toString()
+                }
+            } catch (_: Exception) {
+                // If parsing fails, leave the original URL untouched
             }
 
-            Page(i, imageUrl = url)
+            val finalUrl = if (acc != null) {
+                "$url?$acc"
+            } else {
+                url
+            }
+
+            Page(i, imageUrl = finalUrl)
         }
     }
 

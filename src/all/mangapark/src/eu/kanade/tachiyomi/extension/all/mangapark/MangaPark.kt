@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.mangapark
 
 import android.widget.Toast
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
@@ -101,8 +102,11 @@ class MangaPark(
         val result = response.parseAs<SearchResponse>()
         val pageAsCover = preference.getString(UNCENSORED_COVER_PREF, "off")!!
         val shortenTitle = preference.getBoolean(SHORTEN_TITLE_PREF, false)
+        val customTitleRegex = customRemoveTitle() // Retrieve custom regex
 
-        val entries = result.data.searchComics.items.map { it.data.toSManga(shortenTitle, pageAsCover) }
+        val entries = result.data.searchComics.items.map {
+            it.data.toSManga(shortenTitle, pageAsCover, customTitleRegex) // Pass regex to toSManga
+        }
         val hasNextPage = entries.size == size
 
         return MangasPage(entries, hasNextPage)
@@ -171,8 +175,9 @@ class MangaPark(
         val result = response.parseAs<DetailsResponse>()
         val pageAsCover = preference.getString(UNCENSORED_COVER_PREF, "off")!!
         val shortenTitle = preference.getBoolean(SHORTEN_TITLE_PREF, false)
+        val customTitleRegex = customRemoveTitle() // Retrieve custom regex
 
-        return result.data.comic.data.toSManga(shortenTitle, pageAsCover)
+        return result.data.comic.data.toSManga(shortenTitle, pageAsCover, customTitleRegex) // Pass regex to toSManga
     }
 
     override fun getMangaUrl(manga: SManga) = baseUrl + manga.url.substringBeforeLast("#")
@@ -252,6 +257,13 @@ class MangaPark(
             summary = "Clear database to apply changes\n\n" +
                 "Note: doesn't not work for entries in library"
             setDefaultValue(false)
+        }.also(screen::addPreference)
+
+        EditTextPreference(screen.context).apply { // Add this
+            key = REMOVE_TITLE_CUSTOM_PREF
+            title = "Custom title regex"
+            summary = "If not empty, replace title with custom regex."
+            setDefaultValue("")
         }.also(screen::addPreference)
 
         ListPreference(screen.context).apply {
@@ -366,6 +378,11 @@ class MangaPark(
         throw UnsupportedOperationException()
     }
 
+    private fun customRemoveTitle(): Regex { // Add this function
+        val regex = preference.getString(REMOVE_TITLE_CUSTOM_PREF, "") ?: ""
+        return if (regex.isNotBlank()) Regex(regex) else Regex("")
+    }
+
     companion object {
         private val SERVER_PATTERN = Regex("https://s\\d{2}")
 
@@ -394,6 +411,7 @@ class MangaPark(
         private const val ENABLE_NSFW = "pref_nsfw"
         private const val DUPLICATE_CHAPTER_PREF_KEY = "pref_dup_chapters"
         private const val SHORTEN_TITLE_PREF = "pref_shorten_title"
+        private const val REMOVE_TITLE_CUSTOM_PREF = "pref_custom_title_regex" // Add this
         private const val UNCENSORED_COVER_PREF = "pref_uncensored_cover"
     }
 }

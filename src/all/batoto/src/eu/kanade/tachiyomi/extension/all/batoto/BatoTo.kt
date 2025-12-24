@@ -67,6 +67,9 @@ open class BatoTo(
         get() {
             val raw = when (getVersion()) {
                 "V2X" -> getMirrorPrefV2X()
+                "V3X" -> getMirrorPrefV2X().let {
+                    if (it.endsWith("/v3x", true)) it else it.trimEnd('/') + "/v3x"
+                }
                 "V4X" -> getMirrorPrefV4X()
                 else -> getMirrorPrefV2X()
             }
@@ -95,6 +98,10 @@ open class BatoTo(
         .takeIf { it.isNotBlank() }
         ?.let { URLEncoder.encode(it, StandardCharsets.UTF_8.name()) }
 
+    private val encodedSiteLangV3X = siteLang
+        .takeIf { it.isNotBlank() }
+        ?.let { URLEncoder.encode(it, StandardCharsets.UTF_8.name()) }
+
     override val client = network.cloudflareClient.newBuilder().apply {
         addInterceptor(::imageFallbackInterceptor)
     }.build()
@@ -117,6 +124,7 @@ open class BatoTo(
 
         when (getVersion()) {
             "V2X" -> setupPreferenceScreenV2X(screen)
+            "V3X" -> setupPreferenceScreenV2X(screen)
             "V4X" -> setupPreferenceScreenV4X(screen)
             else -> setupPreferenceScreenV2X(screen)
         }
@@ -297,7 +305,7 @@ open class BatoTo(
     }
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        if (getVersion() == "V4X") {
+        if (getVersion() == "V4X" || getVersion() == "V3X") {
             add("Referer", "$baseUrl/")
         }
     }
@@ -305,7 +313,7 @@ open class BatoTo(
     override fun latestUpdatesRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
-            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
+            "V3X", "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
         }
         return request
@@ -318,7 +326,7 @@ open class BatoTo(
                 "en,en_us" -> "div#series-list div.col.no-flag"
                 else -> "div#series-list div.col:has([data-lang=\"$siteLang\"])"
             }
-            "V4X" -> ""
+            "V3X", "V4X" -> ""
             else -> when (siteLang) {
                 "" -> "div#series-list div.col"
                 "en,en_us" -> "div#series-list div.col.no-flag"
@@ -330,7 +338,7 @@ open class BatoTo(
     override fun latestUpdatesFromElement(element: Element): SManga {
         return when (getVersion()) {
             "V2X" -> latestUpdatesFromElementV2X(element)
-            "V4X" -> SManga.create()
+            "V3X", "V4X" -> SManga.create()
             else -> latestUpdatesFromElementV2X(element)
         }
     }
@@ -349,14 +357,14 @@ open class BatoTo(
 
     override fun latestUpdatesNextPageSelector() = when (getVersion()) {
         "V2X" -> "div#mainer nav.d-none .pagination .page-item:last-of-type:not(.disabled)"
-        "V4X" -> null
+        "V3X", "V4X" -> null
         else -> "div#mainer nav.d-none .pagination .page-item:last-of-type:not(.disabled)"
     }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         return when (getVersion()) {
             "V2X" -> super.latestUpdatesParse(response)
-            "V4X" -> parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
+            "V3X", "V4X" -> parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
             else -> super.latestUpdatesParse(response)
         }
     }
@@ -364,7 +372,7 @@ open class BatoTo(
     override fun popularMangaRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
-            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
+            "V3X", "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
         }
         return request
@@ -379,7 +387,7 @@ open class BatoTo(
     override fun popularMangaParse(response: Response): MangasPage {
         return when (getVersion()) {
             "V2X" -> super.popularMangaParse(response)
-            "V4X" -> parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
+            "V3X", "V4X" -> parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
             else -> super.popularMangaParse(response)
         }
     }
@@ -387,7 +395,7 @@ open class BatoTo(
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         return when (getVersion()) {
             "V2X" -> fetchSearchMangaV2X(page, query, filters)
-            "V4X" -> fetchSearchMangaV4X(page, query, filters)
+            "V3X", "V4X" -> fetchSearchMangaV4X(page, query, filters)
             else -> fetchSearchMangaV2X(page, query, filters)
         }
     }

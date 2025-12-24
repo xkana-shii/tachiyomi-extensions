@@ -312,14 +312,14 @@ open class BatoTo(
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val url = when (getVersion()) {
-            "V2X" -> "$baseUrl/browse?langs=$siteLang&sort=update&page=$page"
-            "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=field_upload&page=$page")
-            "V4X" -> withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page")
-            else -> "$baseUrl/browse?langs=$siteLang&sort=update&page=$page"
+        val request = when (getVersion()) {
+            "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=field_upload&page=$page"), headers)
+            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
+            else -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
         }
-        Log.d(TAG, "latestUpdatesRequest URL: $url")
-        return GET(url, headers)
+        Log.d(TAG, "latestUpdatesRequest URL: ${request.url}")
+        return request
     }
 
     override fun latestUpdatesSelector(): String {
@@ -373,14 +373,14 @@ open class BatoTo(
     }
 
     override fun popularMangaRequest(page: Int): Request {
-        val url = when (getVersion()) {
-            "V2X" -> "$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page"
-            "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=views_d000&page=$page")
-            "V4X" -> withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page")
-            else -> "$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page"
+        val request = when (getVersion()) {
+            "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=views_d000&page=$page"), headers)
+            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
+            else -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
         }
-        Log.d(TAG, "popularMangaRequest URL: $url")
-        return GET(url, headers)
+        Log.d(TAG, "popularMangaRequest URL: ${request.url}")
+        return request
     }
 
     override fun popularMangaSelector() = latestUpdatesSelector()
@@ -410,7 +410,7 @@ open class BatoTo(
             query.startsWith("ID:") -> {
                 val id = query.substringAfter("ID:")
                 val url = "$baseUrl/series/$id"
-                Log.d(TAG, "search (V2X, ID) URL: $url")
+                Log.d(TAG, "search V2X ID URL: $url")
                 client.newCall(GET(url, headers)).asObservableSuccess()
                     .map { response ->
                         queryIDParseV2X(response)
@@ -431,7 +431,7 @@ open class BatoTo(
                     }
                 }
                 val finalUrl = url.build()
-                Log.d(TAG, "search (V2X, text) URL: $finalUrl")
+                Log.d(TAG, "search V2X query URL: $finalUrl")
                 client.newCall(GET(finalUrl, headers)).asObservableSuccess()
                     .map { response ->
                         queryParseV2X(response)
@@ -446,7 +446,7 @@ open class BatoTo(
                         is UtilsFilter -> {
                             if (filter.state != 0) {
                                 val filterUrl = "$baseUrl/_utils/comic-list?type=${filter.selected}"
-                                Log.d(TAG, "search (V2X, utils) URL: $filterUrl")
+                                Log.d(TAG, "search V2X utils filter URL: $filterUrl")
                                 return client.newCall(GET(filterUrl, headers)).asObservableSuccess()
                                     .map { response ->
                                         queryUtilsParseV2X(response)
@@ -456,7 +456,7 @@ open class BatoTo(
                         is HistoryFilter -> {
                             if (filter.state != 0) {
                                 val filterUrl = "$baseUrl/ajax.my.${filter.selected}.paging"
-                                Log.d(TAG, "search (V2X, history) URL: $filterUrl")
+                                Log.d(TAG, "search V2X history filter URL: $filterUrl")
                                 return client.newCall(POST(filterUrl, headers, formBuilder().build())).asObservableSuccess()
                                     .map { response ->
                                         queryHistoryParseV2X(response)
@@ -507,7 +507,7 @@ open class BatoTo(
                 }
 
                 val finalUrl = url.build()
-                Log.d(TAG, "search (V2X, filter) URL: $finalUrl")
+                Log.d(TAG, "search V2X browse URL: $finalUrl")
                 client.newCall(GET(finalUrl, headers)).asObservableSuccess()
                     .map { response ->
                         queryParseV2X(response)
@@ -526,7 +526,7 @@ open class BatoTo(
                 "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x/title/$id")
                 else -> withLangV4X("$baseUrl/title/$id")
             }
-            Log.d(TAG, "search (ID) URL: $url")
+            Log.d(TAG, "search V4X ID URL: $url")
             return client.newCall(GET(url, headers)).asObservableSuccess()
                 .map { queryIdParseV4X(it) }
         }
@@ -543,7 +543,7 @@ open class BatoTo(
         urlBuilder.addQueryParameter("page", page.toString())
         applyFiltersV4X(urlBuilder, filters)
         val finalUrl = urlBuilder.build()
-        Log.d(TAG, "search (V4X/V3X) URL: $finalUrl")
+        Log.d(TAG, "search V4X URL: $finalUrl")
         return client.newCall(GET(finalUrl, headers)).asObservableSuccess()
             .map { response ->
                 parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
@@ -838,34 +838,12 @@ open class BatoTo(
         if (checkChapterLists(document)) {
             throw Exception("Deleted from site")
         }
-        if (getAltChapterListPref()) {
-            return altChapterParseV4X(document)
+        return if (getAltChapterListPref()) {
+            altChapterParseV4X(document)
+        } else {
+            document.select("div.px-2.py-2.flex.flex-wrap.justify-between")
+                .map { chapterFromElementV4X(it) }
         }
-
-        val container = document.selectFirst("div[name=chapter-list], div[data-name=chapter-list]")
-
-        val chapterElements = when {
-            container != null -> {
-                container.select(
-                    "div.px-2.py-2.flex.flex-wrap.justify-between, " +
-                        ".px-2.py-2, div.group .px-2.py-2, div.group > div",
-                )
-            }
-            else -> {
-                document.select(
-                    "div.px-2.py-2.flex.flex-wrap.justify-between, div.px-2.py-2, div[data-name=chapter-list] .px-2.py-2",
-                )
-            }
-        }
-
-        val rows = chapterElements.filter { el ->
-            el.selectFirst("a[href*=/title/], a.link-hover, a.link-primary") != null
-        }
-
-        val chapters = rows.map { chapterFromElementV4X(it) }
-
-        val shouldReverseForV3X = getVersion() == "V3X" && container?.classNames()?.contains("flex-col-reverse") == true
-        return if (shouldReverseForV3X) chapters.reversed() else chapters
     }
 
     private fun altChapterParseV2X(response: Response): List<SChapter> {
@@ -944,29 +922,14 @@ open class BatoTo(
 
     private fun chapterFromElementV4X(element: Element): SChapter {
         val chapter = SChapter.create()
-        val chapterAnchor = element.selectFirst("a.link-hover.link-primary, a.link-hover, a[href*=\"/title/\"]")
+        val chapterAnchor = element.selectFirst("a.link-hover.link-primary")
         chapter.name = chapterAnchor?.text() ?: ""
         chapter.url = chapterAnchor?.attr("href") ?: ""
 
         chapter.scanlator = element.selectFirst("div.inline-flex.items-center.space-x-1 a span")?.text()?.takeIf { it.isNotBlank() }
 
-        val dataTimeLong = element.selectFirst("time[data-time]")?.attr("data-time")?.toLongOrNull()
-        if (dataTimeLong != null) {
-            chapter.date_upload = dataTimeLong
-            return chapter
-        }
+        chapter.date_upload = element.selectFirst("time[data-time]")?.attr("data-time")?.toLongOrNull() ?: 0L
 
-        val timeAttr = element.selectFirst("time[time]")?.attr("time")
-            ?: element.selectFirst("time[datetime]")?.attr("datetime")
-        val timeText = element.selectFirst("time")?.text()
-
-        val sourceTime = when {
-            !timeText.isNullOrBlank() -> timeText
-            !timeAttr.isNullOrBlank() -> timeAttr
-            else -> null
-        }
-
-        chapter.date_upload = sourceTime?.let { parseChapterDate(it) } ?: 0L
         return chapter
     }
     private fun parseChapterDate(date: String): Long {
@@ -1706,7 +1669,6 @@ open class BatoTo(
     }
 
     private companion object {
-
         private const val TAG = "BatoTo"
 
         private const val VERSION_PREF_KEY = "VERSION"

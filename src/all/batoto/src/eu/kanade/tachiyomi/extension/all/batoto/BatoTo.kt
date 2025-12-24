@@ -67,9 +67,6 @@ open class BatoTo(
         get() {
             val raw = when (getVersion()) {
                 "V2X" -> getMirrorPrefV2X()
-                "V3X" -> getMirrorPrefV2X().let {
-                    if (it.endsWith("/v3x", true)) it else it.trimEnd('/') + "/v3x"
-                }
                 "V4X" -> getMirrorPrefV4X()
                 else -> getMirrorPrefV2X()
             }
@@ -305,15 +302,19 @@ open class BatoTo(
     }
 
     override fun headersBuilder() = super.headersBuilder().apply {
-        if (getVersion() == "V4X" || getVersion() == "V3X") {
+        if (getVersion() == "V4X") {
             add("Referer", "$baseUrl/")
+        }
+        if (getVersion() == "V3X") {
+            add("Referer", "${baseUrl.trimEnd('/')}/v3x/")
         }
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
-            "V3X", "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?sort=field_update&order=desc&page=$page"), headers)
+            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
         }
         return request
@@ -372,7 +373,8 @@ open class BatoTo(
     override fun popularMangaRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
-            "V3X", "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?sort=views_d000&order=desc&page=$page"), headers)
+            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
         }
         return request
@@ -512,12 +514,19 @@ open class BatoTo(
             if (id.isBlank()) {
                 return Observable.just(MangasPage(emptyList(), false))
             }
-            val url = withLangV4X("$baseUrl/title/$id")
+            val url = when (getVersion()) {
+                "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x/title/$id")
+                else -> withLangV4X("$baseUrl/title/$id")
+            }
             return client.newCall(GET(url, headers)).asObservableSuccess()
                 .map { queryIdParseV4X(it) }
         }
 
-        val urlBuilder = "$baseUrl/comics".toHttpUrl().newBuilder()
+        val urlBuilder = when (getVersion()) {
+            "V3X" -> "${baseUrl.trimEnd('/')}/v3x-search".toHttpUrl().newBuilder()
+            else -> "$baseUrl/comics".toHttpUrl().newBuilder()
+        }
+
         val trimmedQuery = query.trim()
         if (trimmedQuery.isNotBlank()) {
             urlBuilder.addQueryParameter("word", trimmedQuery)
@@ -530,6 +539,7 @@ open class BatoTo(
                 parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
             }
     }
+
     private fun queryIDParseV2X(response: Response): MangasPage {
         val document = response.asJsoup()
         val infoElement = document.select("div#mainer div.container-fluid")

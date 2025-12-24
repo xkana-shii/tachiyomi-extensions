@@ -838,12 +838,34 @@ open class BatoTo(
         if (checkChapterLists(document)) {
             throw Exception("Deleted from site")
         }
-        return if (getAltChapterListPref()) {
-            altChapterParseV4X(document)
-        } else {
-            document.select("div.px-2.py-2.flex.flex-wrap.justify-between")
-                .map { chapterFromElementV4X(it) }
+        if (getAltChapterListPref()) {
+            return altChapterParseV4X(document)
         }
+
+        val container = document.selectFirst("div[name=chapter-list], div[data-name=chapter-list]")
+
+        val chapterElements = when {
+            container != null -> {
+                container.select(
+                    "div.px-2.py-2.flex.flex-wrap.justify-between, " +
+                        ".px-2.py-2, div.group .px-2.py-2, div.group > div",
+                )
+            }
+            else -> {
+                document.select(
+                    "div.px-2.py-2.flex.flex-wrap.justify-between, div.px-2.py-2, div[data-name=chapter-list] .px-2.py-2",
+                )
+            }
+        }
+
+        val rows = chapterElements.filter { el ->
+            el.selectFirst("a[href*=/title/], a.link-hover, a.link-primary") != null
+        }
+
+        val chapters = rows.map { chapterFromElementV4X(it) }
+
+        val shouldReverseForV3X = getVersion() == "V3X" && container?.classNames()?.contains("flex-col-reverse") == true
+        return if (shouldReverseForV3X) chapters.reversed() else chapters
     }
 
     private fun altChapterParseV2X(response: Response): List<SChapter> {
@@ -922,14 +944,29 @@ open class BatoTo(
 
     private fun chapterFromElementV4X(element: Element): SChapter {
         val chapter = SChapter.create()
-        val chapterAnchor = element.selectFirst("a.link-hover.link-primary")
+        val chapterAnchor = element.selectFirst("a.link-hover.link-primary, a.link-hover, a[href*=\"/title/\"]")
         chapter.name = chapterAnchor?.text() ?: ""
         chapter.url = chapterAnchor?.attr("href") ?: ""
 
         chapter.scanlator = element.selectFirst("div.inline-flex.items-center.space-x-1 a span")?.text()?.takeIf { it.isNotBlank() }
 
-        chapter.date_upload = element.selectFirst("time[data-time]")?.attr("data-time")?.toLongOrNull() ?: 0L
+        val dataTimeLong = element.selectFirst("time[data-time]")?.attr("data-time")?.toLongOrNull()
+        if (dataTimeLong != null) {
+            chapter.date_upload = dataTimeLong
+            return chapter
+        }
 
+        val timeAttr = element.selectFirst("time[time]")?.attr("time")
+            ?: element.selectFirst("time[datetime]")?.attr("datetime")
+        val timeText = element.selectFirst("time")?.text()
+
+        val sourceTime = when {
+            !timeText.isNullOrBlank() -> timeText
+            !timeAttr.isNullOrBlank() -> timeAttr
+            else -> null
+        }
+
+        chapter.date_upload = sourceTime?.let { parseChapterDate(it) } ?: 0L
         return chapter
     }
     private fun parseChapterDate(date: String): Long {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
@@ -311,13 +312,14 @@ open class BatoTo(
     }
 
     override fun latestUpdatesRequest(page: Int): Request {
-        val request = when (getVersion()) {
-            "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
-            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=field_upload&page=$page"), headers)
-            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
-            else -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
+        val url = when (getVersion()) {
+            "V2X" -> "$baseUrl/browse?langs=$siteLang&sort=update&page=$page"
+            "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=field_upload&page=$page")
+            "V4X" -> withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page")
+            else -> "$baseUrl/browse?langs=$siteLang&sort=update&page=$page"
         }
-        return request
+        Log.d(TAG, "latestUpdatesRequest URL: $url")
+        return GET(url, headers)
     }
 
     override fun latestUpdatesSelector(): String {
@@ -371,13 +373,14 @@ open class BatoTo(
     }
 
     override fun popularMangaRequest(page: Int): Request {
-        val request = when (getVersion()) {
-            "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
-            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=views_d000&page=$page"), headers)
-            "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
-            else -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
+        val url = when (getVersion()) {
+            "V2X" -> "$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page"
+            "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=views_d000&page=$page")
+            "V4X" -> withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page")
+            else -> "$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page"
         }
-        return request
+        Log.d(TAG, "popularMangaRequest URL: $url")
+        return GET(url, headers)
     }
 
     override fun popularMangaSelector() = latestUpdatesSelector()
@@ -407,6 +410,7 @@ open class BatoTo(
             query.startsWith("ID:") -> {
                 val id = query.substringAfter("ID:")
                 val url = "$baseUrl/series/$id"
+                Log.d(TAG, "search (V2X, ID) URL: $url")
                 client.newCall(GET(url, headers)).asObservableSuccess()
                     .map { response ->
                         queryIDParseV2X(response)
@@ -427,6 +431,7 @@ open class BatoTo(
                     }
                 }
                 val finalUrl = url.build()
+                Log.d(TAG, "search (V2X, text) URL: $finalUrl")
                 client.newCall(GET(finalUrl, headers)).asObservableSuccess()
                     .map { response ->
                         queryParseV2X(response)
@@ -441,6 +446,7 @@ open class BatoTo(
                         is UtilsFilter -> {
                             if (filter.state != 0) {
                                 val filterUrl = "$baseUrl/_utils/comic-list?type=${filter.selected}"
+                                Log.d(TAG, "search (V2X, utils) URL: $filterUrl")
                                 return client.newCall(GET(filterUrl, headers)).asObservableSuccess()
                                     .map { response ->
                                         queryUtilsParseV2X(response)
@@ -450,6 +456,7 @@ open class BatoTo(
                         is HistoryFilter -> {
                             if (filter.state != 0) {
                                 val filterUrl = "$baseUrl/ajax.my.${filter.selected}.paging"
+                                Log.d(TAG, "search (V2X, history) URL: $filterUrl")
                                 return client.newCall(POST(filterUrl, headers, formBuilder().build())).asObservableSuccess()
                                     .map { response ->
                                         queryHistoryParseV2X(response)
@@ -500,6 +507,7 @@ open class BatoTo(
                 }
 
                 val finalUrl = url.build()
+                Log.d(TAG, "search (V2X, filter) URL: $finalUrl")
                 client.newCall(GET(finalUrl, headers)).asObservableSuccess()
                     .map { response ->
                         queryParseV2X(response)
@@ -518,6 +526,7 @@ open class BatoTo(
                 "V3X" -> withLangV4X("${baseUrl.trimEnd('/')}/v3x/title/$id")
                 else -> withLangV4X("$baseUrl/title/$id")
             }
+            Log.d(TAG, "search (ID) URL: $url")
             return client.newCall(GET(url, headers)).asObservableSuccess()
                 .map { queryIdParseV4X(it) }
         }
@@ -534,6 +543,7 @@ open class BatoTo(
         urlBuilder.addQueryParameter("page", page.toString())
         applyFiltersV4X(urlBuilder, filters)
         val finalUrl = urlBuilder.build()
+        Log.d(TAG, "search (V4X/V3X) URL: $finalUrl")
         return client.newCall(GET(finalUrl, headers)).asObservableSuccess()
             .map { response ->
                 parseMangaListV4X(response.asJsoup(), pageFromResponseV4X(response))
@@ -1659,6 +1669,9 @@ open class BatoTo(
     }
 
     private companion object {
+
+        private const val TAG = "BatoTo"
+
         private const val VERSION_PREF_KEY = "VERSION"
         private const val VERSION_PREF_TITLE = "Site Version"
         private val VERSION_PREF_ENTRIES = arrayOf("V2X", "V3X", "V4X")

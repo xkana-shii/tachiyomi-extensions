@@ -313,7 +313,7 @@ open class BatoTo(
     override fun latestUpdatesRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
-            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?sort=field_update&order=desc&page=$page"), headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=field_upload&page=$page"), headers)
             "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=field_update&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=update&page=$page", headers)
         }
@@ -373,7 +373,7 @@ open class BatoTo(
     override fun popularMangaRequest(page: Int): Request {
         val request = when (getVersion()) {
             "V2X" -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
-            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?sort=views_d000&order=desc&page=$page"), headers)
+            "V3X" -> GET(withLangV4X("${baseUrl.trimEnd('/')}/v3x-search?order=desc&sort=views_d000&page=$page"), headers)
             "V4X" -> GET(withLangV4X("$baseUrl/comics?sortby=views_d000&order=desc&page=$page"), headers)
             else -> GET("$baseUrl/browse?langs=$siteLang&sort=views_a&page=$page", headers)
         }
@@ -1095,25 +1095,32 @@ open class BatoTo(
         val removedParts = mutableListOf<String>()
         var cleanedTitle = ""
 
-        if (resolved != null) {
-            val originalTitle = asString(resolved.opt("name")) ?: ""
-            cleanedTitle = originalTitle
-
-            fun removeAndCollect(regex: Regex) {
-                regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
-                cleanedTitle = cleanedTitle.replace(regex, "")
-            }
-
-            customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
-            if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
-            cleanedTitle = cleanedTitle.trim()
-            details.title = cleanedTitle
-
-            val authorsList = extractStringList(resolved.opt("authors"))
-            if (authorsList.isNotEmpty()) details.author = authorsList.joinToString()
-            val artistsList = extractStringList(resolved.opt("artists"))
-            if (artistsList.isNotEmpty()) details.artist = artistsList.joinToString()
+        val h3LinkTitle = document.selectFirst("h3 a.link.link-hover, h3 a.link-hover, h3 a")?.text()?.trim()
+        val resolvedName = resolved?.let { asString(it.opt("name")) }
+        val originalTitle = when (getVersion()) {
+            "V3X" -> h3LinkTitle ?: resolvedName ?: ""
+            else -> resolvedName ?: h3LinkTitle ?: ""
         }
+
+        if (originalTitle.isNotBlank()) {
+            cleanedTitle = originalTitle
+        }
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+        details.title = cleanedTitle
+
+        val authorsList = resolved?.let { extractStringList(it.opt("authors")) } ?: emptyList()
+        if (authorsList.isNotEmpty()) details.author = authorsList.joinToString()
+
+        val artistsList = resolved?.let { extractStringList(it.opt("artists")) } ?: emptyList()
+        if (artistsList.isNotEmpty()) details.artist = artistsList.joinToString()
 
         val genreList = document.select("div.flex.items-center.flex-wrap > span span.font-bold")
             .map { it.text().trim() }

@@ -133,7 +133,7 @@ open class BatoTo(
     private fun setupPreferenceScreenV2X(screen: PreferenceScreen) {
         val mirrorPref = ListPreference(screen.context).apply {
             key = "${MIRROR_PREF_KEY_V2X}_$lang"
-            title = MIRROR_PREF_TITLE_V2X
+            title = if (getVersion() == "V3X") "Mirror (V3X)" else MIRROR_PREF_TITLE_V2X
             entries = MIRROR_PREF_ENTRIES_V2X
             entryValues = MIRROR_PREF_ENTRY_VALUES_V2X
             setDefaultValue(MIRROR_PREF_DEFAULT_VALUE_V2X)
@@ -607,7 +607,7 @@ open class BatoTo(
 
         val actualUrl = when (getVersion()) {
             "V2X" -> "$baseUrl/series/$normalizedId"
-            "V4X" -> "$baseUrl/title/$normalizedId"
+            "V3X", "V4X" -> "$baseUrl/title/$normalizedId"
             else -> "$baseUrl/series/$normalizedId"
         }
 
@@ -617,6 +617,7 @@ open class BatoTo(
     override fun mangaDetailsParse(document: Document): SManga {
         return when (getVersion()) {
             "V2X" -> mangaDetailsParseV2X(document)
+            "V3X" -> mangaDetailsParseV4X(document)
             "V4X" -> mangaDetailsParseV4X(document)
             else -> mangaDetailsParseV2X(document)
         }
@@ -625,6 +626,7 @@ open class BatoTo(
     override fun mangaDetailsParse(response: Response): SManga {
         val manga = when (getVersion()) {
             "V2X" -> super.mangaDetailsParse(response)
+            "V3X" -> mangaDetailsParseV4X(response.asJsoup())
             "V4X" -> mangaDetailsParseV4X(response.asJsoup())
             else -> super.mangaDetailsParse(response)
         }
@@ -774,7 +776,7 @@ open class BatoTo(
 
         val actualUrl = when (getVersion()) {
             "V2X" -> "$baseUrl/series/$normalizedId"
-            "V4X" -> "$baseUrl/title/$normalizedId"
+            "V3X", "V4X" -> "$baseUrl/title/$normalizedId"
             else -> "$baseUrl/series/$normalizedId"
         }
 
@@ -784,7 +786,7 @@ open class BatoTo(
     override fun chapterListParse(response: Response): List<SChapter> {
         return when (getVersion()) {
             "V2X" -> if (getAltChapterListPref()) altChapterParseV2X(response) else chapterListParseV2X(response)
-            "V4X" -> {
+            "V3X", "V4X" -> {
                 if (getAltChapterListPref()) {
                     altChapterParseV4X(response.asJsoup())
                 } else {
@@ -874,7 +876,7 @@ open class BatoTo(
     override fun chapterFromElement(element: Element): SChapter {
         return when (getVersion()) {
             "V2X" -> chapterFromElementV2X(element)
-            "V4X" -> chapterFromElementV4X(element)
+            "V3X", "V4X" -> chapterFromElementV4X(element)
             else -> chapterFromElementV2X(element)
         }
     }
@@ -978,7 +980,7 @@ open class BatoTo(
     override fun pageListParse(document: Document): List<Page> {
         return when (getVersion()) {
             "V2X" -> pageListParseV2X(document)
-            "V4X" -> emptyList()
+            "V3X", "V4X" -> emptyList()
             else -> pageListParseV2X(document)
         }
     }
@@ -986,7 +988,7 @@ open class BatoTo(
     override fun pageListParse(response: Response): List<Page> {
         return when (getVersion()) {
             "V2X" -> super.pageListParse(response)
-            "V4X" -> parsePageListV4X(response.asJsoup())
+            "V3X", "V4X" -> parsePageListV4X(response.asJsoup())
             else -> super.pageListParse(response)
         }
     }
@@ -1021,7 +1023,7 @@ open class BatoTo(
     override fun imageUrlParse(response: Response): String {
         return when (getVersion()) {
             "V2X" -> ""
-            "V4X" -> ""
+            "V3X", "V4X" -> ""
             else -> ""
         }
     }
@@ -1378,7 +1380,11 @@ open class BatoTo(
     }
 
     private fun withLangV4X(url: String): String {
-        val langValue = encodedSiteLangV4X ?: return url
+        val langValue = when (getVersion()) {
+            "V4X" -> encodedSiteLangV4X
+            "V3X" -> encodedSiteLangV3X ?: encodedSiteLangV4X
+            else -> encodedSiteLangV4X
+        } ?: return url
         val separator = if (url.contains("?")) "&" else "?"
         return "$url${separator}lang=$langValue"
     }
@@ -1638,8 +1644,8 @@ open class BatoTo(
     private companion object {
         private const val VERSION_PREF_KEY = "VERSION"
         private const val VERSION_PREF_TITLE = "Site Version"
-        private val VERSION_PREF_ENTRIES = arrayOf("V2X", "V4X")
-        private val VERSION_PREF_ENTRY_VALUES = arrayOf("V2X", "V4X")
+        private val VERSION_PREF_ENTRIES = arrayOf("V2X", "V3X", "V4X")
+        private val VERSION_PREF_ENTRY_VALUES = arrayOf("V2X", "V3X", "V4X")
         private const val VERSION_PREF_DEFAULT_VALUE = "V2X"
 
         private const val MIRROR_PREF_KEY_V2X = "MIRROR_V2X"

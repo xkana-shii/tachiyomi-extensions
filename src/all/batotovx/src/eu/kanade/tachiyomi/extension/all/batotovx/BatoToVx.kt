@@ -1,0 +1,185 @@
+package eu.kanade.tachiyomi.extension.all.batotovx
+
+import android.widget.Toast
+import androidx.preference.ListPreference
+import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.extension.all.batoto.BatoTo
+import eu.kanade.tachiyomi.extension.all.batotov4.BatoToV4
+import eu.kanade.tachiyomi.source.ConfigurableSource
+import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.getPreferencesLazy
+import okhttp3.Interceptor
+import okhttp3.Response
+import java.util.concurrent.TimeUnit
+import kotlin.getValue
+
+open class BatoToVx(
+    final override val lang: String,
+    private val siteLang: String,
+) : ConfigurableSource, HttpSource() {
+
+    override val name: String = "Bato.to VX"
+
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .build()
+
+    private val preferences by getPreferencesLazy()
+
+    private fun siteVer(): String {
+        return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
+    }
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+
+        if (response.isSuccessful) return response
+
+        val urlString = request.url.toString()
+
+        // We know the first attempt failed. Close the response body to release the
+        // connection from the pool and prevent resource leaks before we start the retry loop.
+        // This is critical; otherwise, new requests in the loop may hang or fail.
+        response.close()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            val regex = Regex("""https://([kn])(\d{2})""")
+            val match = regex.find(urlString)
+            if (match != null) {
+                val (currentLetter, number) = match.destructured
+                // swap just the letter between 'k' and 'n'
+                val fallbackLetter = if (currentLetter == "k") "n" else "k"
+                val newUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
+                if (newUrl != urlString) {
+                    val newRequest = request.newBuilder()
+                        .url(newUrl)
+                        .build()
+                    try {
+                        val newResponse = chain
+                            .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                            .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .proceed(newRequest)
+                        if (newResponse.isSuccessful) {
+                            return newResponse
+                        }
+                        newResponse.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            // (keep fallback server loop here unchanged)
+            val servers = listOf(
+                "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
+                "k05", "k07",
+                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
+            )
+
+            for (server in servers) {
+                if (urlString.contains("https://$server")) continue
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                // Skip if we are about to try the exact same URL that just failed
+                if (newUrl == urlString) continue
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    // FORCE SHORT TIMEOUTS FOR FALLBACKS
+                    // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
+                    val newResponse = chain
+                        .withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+                    // If this server also failed, close and loop to the next one
+                    newResponse.close()
+                } catch (_: Exception) {
+                    // Connection error on this mirror, ignore and loop to next
+                }
+            }
+        }
+
+        // If everything failed, re-run original request to return the standard error
+        return chain.proceed(request)
+    }
+
+    private val _delegate: HttpSource
+        get() = when (siteVer()) {
+            "v4" -> BatoToV4(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+            else -> BatoTo(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+        }
+
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        val siteVerPref = ListPreference(screen.context).apply {
+            key = "${SITE_VER_PREF_KEY}_$lang"
+            title = SITE_VER_PREF_TITLE
+            entries = SITE_VER_PREF_ENTRIES
+            entryValues = SITE_VER_PREF_ENTRIES
+            setDefaultValue(SITE_VER_PREF_DEFAULT_VALUE)
+            summary = "%s"
+
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
+            }
+        }
+
+        screen.addPreference(siteVerPref)
+        (_delegate as ConfigurableSource).setupPreferenceScreen(screen)
+    }
+
+    override val baseUrl: String get() = _delegate.baseUrl
+
+    override val supportsLatest = _delegate.supportsLatest
+
+    // ************ Search ************ //
+    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
+    override fun latestUpdatesParse(response: Response) = throw UnsupportedOperationException()
+    override fun fetchLatestUpdates(page: Int) = _delegate.fetchLatestUpdates(page)
+
+    override fun popularMangaRequest(page: Int) = throw UnsupportedOperationException()
+    override fun popularMangaParse(response: Response) = throw UnsupportedOperationException()
+    override fun fetchPopularManga(page: Int) = _delegate.fetchPopularManga(page)
+
+    override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException()
+    override fun fetchMangaDetails(manga: SManga) = _delegate.fetchMangaDetails(manga)
+
+    override fun getMangaUrl(manga: SManga) = _delegate.getMangaUrl(manga)
+    override fun getChapterUrl(chapter: SChapter) = _delegate.getChapterUrl(chapter)
+
+    // searchMangaRequest is not used, see fetchSearchManga instead
+    override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = throw UnsupportedOperationException()
+    override fun searchMangaParse(response: Response) = throw UnsupportedOperationException()
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList) = _delegate.fetchSearchManga(page, query, filters)
+
+    override fun fetchChapterList(manga: SManga) = _delegate.fetchChapterList(manga)
+    override fun fetchPageList(chapter: SChapter) = _delegate.fetchPageList(chapter)
+    override fun fetchImageUrl(page: Page) = _delegate.fetchImageUrl(page)
+
+    override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
+    override fun pageListParse(response: Response) = throw UnsupportedOperationException()
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
+
+    override fun getFilterList() = _delegate.getFilterList()
+
+    companion object {
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
+        private const val SITE_VER_PREF_KEY = "SITE_VER"
+        private const val SITE_VER_PREF_TITLE = "Site version"
+        private val SITE_VER_PREF_ENTRIES = arrayOf(
+            "v2",
+            "v4",
+        )
+        private val SITE_VER_PREF_DEFAULT_VALUE = SITE_VER_PREF_ENTRIES[0]
+    }
+}

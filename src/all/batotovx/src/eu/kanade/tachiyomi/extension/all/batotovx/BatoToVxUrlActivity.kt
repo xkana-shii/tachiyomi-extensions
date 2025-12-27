@@ -24,7 +24,7 @@ class BatoToVxUrlActivity : Activity() {
             }
 
             val mainIntent = Intent().apply {
-                Intent.setAction = "eu.kanade.tachiyomi.SEARCH"
+                action = "eu.kanade.tachiyomi.SEARCH"
                 putExtra("query", query)
                 putExtra("filter", packageName)
             }

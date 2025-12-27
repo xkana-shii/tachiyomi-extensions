@@ -182,7 +182,7 @@ open class BatoToV4(
     private fun getUserIdPref(): String =
         preferences.getString("${USER_ID_PREF}_$lang", "")!!
 
-    private fun SharedPreferences.migrateMirrorPref() {
+    protected fun SharedPreferences.migrateMirrorPref() {
         val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
 
         if (selectedMirror in DEPRECATED_MIRRORS) {

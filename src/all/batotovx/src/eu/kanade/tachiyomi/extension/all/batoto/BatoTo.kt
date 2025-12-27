@@ -25,7 +25,6 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.utils.getPreferencesLazy
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -49,15 +48,15 @@ import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 import kotlin.text.Regex
 
 open class BatoTo(
     final override val lang: String,
     private val siteLang: String,
+    private val preferences: SharedPreferences,
 ) : ConfigurableSource, ParsedHttpSource() {
-
-    private val preferences by getPreferencesLazy { migrateMirrorPref() }
 
     override val name: String = "Bato.to"
 
@@ -170,11 +169,11 @@ open class BatoTo(
     private fun customRemoveTitle(): String =
         preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
 
-    private fun SharedPreferences.migrateMirrorPref() {
-        val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
+    internal fun migrateMirrorPref() {
+        val selectedMirror = preferences.getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
 
         if (selectedMirror in DEPRECATED_MIRRORS) {
-            edit().putString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE).apply()
+            preferences.edit().putString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE).apply()
         }
     }
 
@@ -671,8 +670,8 @@ open class BatoTo(
                     // FORCE SHORT TIMEOUTS FOR FALLBACKS
                     // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
                     val newResponse = chain
-                        .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                        .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                        .withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(10, TimeUnit.SECONDS)
                         .proceed(newRequest)
 
                     if (newResponse.isSuccessful) {
@@ -680,7 +679,7 @@ open class BatoTo(
                     }
                     // If this server also failed, close and loop to the next one
                     newResponse.close()
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     // Connection error on this mirror, ignore and loop to next
                 }
             }

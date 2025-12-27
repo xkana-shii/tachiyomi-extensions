@@ -1,19 +1,18 @@
 package eu.kanade.tachiyomi.extension.all.batotovx
 
+import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.batoto.BatoTo
 import eu.kanade.tachiyomi.extension.all.batotov4.BatoToV4
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
 import okhttp3.Response
-import rx.Observable
 import kotlin.getValue
 
 open class BatoToVx(
@@ -23,9 +22,17 @@ open class BatoToVx(
 
     override val name: String = "Bato.to Vx"
 
-    override val baseUrl: String get() = _delegate.baseUrl
-
     private val preferences by getPreferencesLazy()
+
+    private fun siteVer(): String {
+        return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
+    }
+
+    private val _delegate: HttpSource =
+        when (siteVer()) {
+            "v4" -> BatoToV4(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+            else -> BatoTo(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+        }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val siteVerPref = ListPreference(screen.context).apply {
@@ -35,21 +42,18 @@ open class BatoToVx(
             entryValues = SITE_VER_PREF_ENTRIES
             setDefaultValue(SITE_VER_PREF_DEFAULT_VALUE)
             summary = "%s"
+
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
+            }
         }
 
         screen.addPreference(siteVerPref)
         (_delegate as ConfigurableSource).setupPreferenceScreen(screen)
     }
 
-    private fun siteVer(): String {
-        return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
-    }
-
-    private val _delegate: HttpSource =
-        when (siteVer()) {
-            "v4" -> BatoToV4(lang, siteLang)
-            else -> BatoTo(lang, siteLang)
-        }
+    override val baseUrl: String get() = _delegate.baseUrl
 
     override val supportsLatest = _delegate.supportsLatest
 
@@ -63,18 +67,18 @@ open class BatoToVx(
     override fun fetchPopularManga(page: Int) = _delegate.fetchPopularManga(page)
 
     override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException()
-    override fun fetchMangaDetails(manga: SManga) =  _delegate.fetchMangaDetails(manga)
+    override fun fetchMangaDetails(manga: SManga) = _delegate.fetchMangaDetails(manga)
 
     override fun getMangaUrl(manga: SManga) = _delegate.getMangaUrl(manga)
 
     // searchMangaRequest is not used, see fetchSearchManga instead
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = throw UnsupportedOperationException()
     override fun searchMangaParse(response: Response) = throw UnsupportedOperationException()
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList) =  _delegate.fetchSearchManga(page, query, filters)
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList) = _delegate.fetchSearchManga(page, query, filters)
 
-    override fun fetchChapterList(manga: SManga)  = _delegate.fetchChapterList(manga)
-    override fun fetchPageList(chapter: SChapter)  = _delegate.fetchPageList(chapter)
-    override fun fetchImageUrl(page: Page)  = _delegate.fetchImageUrl(page)
+    override fun fetchChapterList(manga: SManga) = _delegate.fetchChapterList(manga)
+    override fun fetchPageList(chapter: SChapter) = _delegate.fetchPageList(chapter)
+    override fun fetchImageUrl(page: Page) = _delegate.fetchImageUrl(page)
 
     override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
     override fun pageListParse(response: Response) = throw UnsupportedOperationException()

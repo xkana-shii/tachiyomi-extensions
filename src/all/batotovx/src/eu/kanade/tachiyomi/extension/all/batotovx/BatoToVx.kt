@@ -95,6 +95,8 @@ open class BatoToVx(
     override fun pageListParse(response: Response) = throw UnsupportedOperationException()
     override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 
+    override fun getFilterList() = _delegate.getFilterList()
+
     companion object {
         private const val SITE_VER_PREF_KEY = "SITE_VER"
         private const val SITE_VER_PREF_TITLE = "Site version"

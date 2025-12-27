@@ -1,8 +1,7 @@
 ext {
-    kmkVersionCode = 2
-    extName = 'Bato.to'
-    extClass = '.BatoToFactory'
-    extVersionCode = 57
+    extName = 'Bato.to Vx'
+    extClass = '.BatoToVxFactory'
+    extVersionCode = 1
     isNsfw = true
 }
 

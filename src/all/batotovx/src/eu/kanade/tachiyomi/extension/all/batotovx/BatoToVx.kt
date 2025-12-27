@@ -28,8 +28,8 @@ open class BatoToVx(
         return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
     }
 
-    private val _delegate: HttpSource =
-        when (siteVer()) {
+    private val _delegate: HttpSource
+        get() = when (siteVer()) {
             "v4" -> BatoToV4(lang, siteLang, preferences).also { it.migrateMirrorPref() }
             else -> BatoTo(lang, siteLang, preferences).also { it.migrateMirrorPref() }
         }

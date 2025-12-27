@@ -198,8 +198,7 @@ open class BatoTo(
         val item = element.select("a.item-cover")
         val imgurl = item.select("img").attr("abs:src")
         manga.setUrlWithoutDomain(stripSeriesUrl(item.attr("href")))
-        manga.title = element.select("a.item-title").text().removeEntities()
-            .cleanTitleIfNeeded()
+        manga.title = element.select("a.item-title").text().removeEntities().cleanTitleIfNeeded()
         manga.thumbnail_url = imgurl
         return manga
     }
@@ -323,8 +322,7 @@ open class BatoTo(
         val document = response.asJsoup()
         val infoElement = document.select("div#mainer div.container-fluid")
         val manga = SManga.create()
-        manga.title = infoElement.select("h3").text().removeEntities()
-            .cleanTitleIfNeeded()
+        manga.title = infoElement.select("h3").text().removeEntities().cleanTitleIfNeeded()
         manga.thumbnail_url = document.select("div.attr-cover img")
             .attr("abs:src")
         manga.setUrlWithoutDomain(stripSeriesUrl(infoElement.select("h3 a").attr("abs:href")))
@@ -359,8 +357,7 @@ open class BatoTo(
     private fun searchUtilsFromElement(element: Element): SManga {
         val manga = SManga.create()
         manga.setUrlWithoutDomain(stripSeriesUrl(element.select("td a").attr("href")))
-        manga.title = element.select("td a").text()
-            .cleanTitleIfNeeded()
+        manga.title = element.select("td a").text().cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
         return manga
     }
@@ -368,8 +365,7 @@ open class BatoTo(
     private fun searchHistoryFromElement(element: Element): SManga {
         val manga = SManga.create()
         manga.setUrlWithoutDomain(stripSeriesUrl(element.select(".position-relative a").attr("href")))
-        manga.title = element.select(".position-relative a").text()
-            .cleanTitleIfNeeded()
+        manga.title = element.select(".position-relative a").text().cleanTitleIfNeeded()
         manga.thumbnail_url = element.select("img").attr("abs:src")
         return manga
     }
@@ -446,12 +442,7 @@ open class BatoTo(
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = if (originalTitle.trim() != cleanedTitle) {
-            listOf(originalTitle, description)
-                .joinToString("\n\n")
-        } else {
-            description
-        }
+        manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }

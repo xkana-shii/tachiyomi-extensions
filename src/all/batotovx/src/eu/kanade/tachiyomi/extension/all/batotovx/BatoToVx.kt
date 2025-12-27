@@ -22,7 +22,7 @@ open class BatoToVx(
     private val siteLang: String,
 ) : ConfigurableSource, HttpSource() {
 
-    override val name: String = "Bato.to Vx"
+    override val name: String = "Bato.to VX"
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor(::imageFallbackInterceptor)

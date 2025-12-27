@@ -66,6 +66,10 @@
             <data android:host="mto.to" />
             <data android:host="*.wto.to" />
             <data android:host="wto.to" />
+            <data android:host="bato.si" />
+            <data android:host="*.bato.si" />
+            <data android:host="bato.ing" />
+            <data android:host="*.bato.ing" />
 
             <data
                 android:pathPattern="/series/..*"

@@ -59,6 +59,10 @@ abstract class EHentai(
 
     private var lastMangaId = ""
 
+    private val displayFullTitle: Boolean = false
+    private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
+    private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
+
     // true if lang is a "natural human language"
     private fun isLangNatural(): Boolean = lang !in listOf("none", "other")
 
@@ -82,7 +86,9 @@ abstract class EHentai(
                 SManga.create().apply {
                     // Get title
                     it.selectFirst("a")?.apply {
-                        title = this.select(".glink").text()
+                        title = this.select(".glink").text().let {
+                            if (displayFullTitle) it.trim() else it.shortenTitle()
+                        }
                         url = ExGalleryMetadata.normalizeUrl(attr("href"))
                         if (i == mangaElements.lastIndex) {
                             lastMangaId = ExGalleryMetadata.galleryId(attr("href"))
@@ -108,7 +114,7 @@ abstract class EHentai(
         listOf(
             SChapter.create().apply {
                 url = manga.url
-                name = "Chapter"
+                name = "Chapter 1"
                 chapter_number = 1f
             },
         ),
@@ -249,9 +255,13 @@ abstract class EHentai(
     override fun mangaDetailsParse(response: Response) = with(response.asJsoup()) {
         with(ExGalleryMetadata()) {
             url = response.request.url.encodedPath
-            title = select("#gn").text().nullIfBlank()?.trim()
+            title = select("#gn").text().nullIfBlank()?.trim()?.let {
+                if (displayFullTitle) it else it.shortenTitle()
+            }
 
-            altTitle = select("#gj").text().nullIfBlank()?.trim()
+            altTitle = select("#gj").text().nullIfBlank()?.trim()?.let {
+                it.shortenTitle()
+            }
 
             // Thumbnail is set as background of element in style attribute
             thumbnailUrl = select("#gd1 div").attr("style").nullIfBlank()?.let {
@@ -310,11 +320,11 @@ abstract class EHentai(
 
             // Parse tags
             tags.clear()
-            select("#taglist tr").forEach {
-                val namespace = it.select(".tc").text().removeSuffix(":")
-                val currentTags = it.select("div").map { element ->
+            select("#taglist tr").forEach { trElement ->
+                val namespace = trElement.select(".tc").text().removeSuffix(":")
+                val currentTags = trElement.select("div[id^=td]").map { element ->
                     Tag(
-                        element.text().trim(),
+                        element.select("a").text().trim(),
                         element.hasClass("gtl"),
                     )
                 }
@@ -608,7 +618,7 @@ abstract class EHentai(
         private const val ENFORCE_LANGUAGE_PREF_KEY = "ENFORCE_LANGUAGE"
         private const val ENFORCE_LANGUAGE_PREF_TITLE = "Enforce Language"
         private const val ENFORCE_LANGUAGE_PREF_SUMMARY = "If checked, forces browsing of manga matching a language tag"
-        private const val ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE = false
+        private const val ENFORCE_LANGUAGE_PREF_DEFAULT_VALUE = true
 
         private const val ORIGINAL_IMAGE_PREF_KEY = "ORIGINAL_IMAGE"
         private const val ORIGINAL_IMAGE_PREF_TITLE = "Original Image"

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.util.Base64
+import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import app.cash.quickjs.QuickJs
@@ -167,23 +168,25 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
     override fun searchMangaNextPageSelector() = genreListingNextPageSelector
 
     private var titleRegex: Regex =
-        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official", RegexOption.IGNORE_CASE)
+        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
-        title = document.selectFirst(".w-title h1")!!.text()
-        if (isRemoveTitleVersion()) {
-            title = title.replace(titleRegex, "").trim()
-        }
-
+        val originalTitle = document.selectFirst(".w-title h1")!!.text()
+        val cleanedTitle = originalTitle
+            .replace(Regex(customRemoveTitle()), "")
+            .replace(if (isRemoveTitleVersion()) titleRegex else Regex(""), "")
+            .trim()
+        title = cleanedTitle
         document.getElementById("information")!!.let {
             thumbnail_url = it.selectFirst("img")!!.attr("abs:src")
+            var alternativeTitles = ""
             description = it.selectFirst(".manga_summary")?.let { summary ->
                 summary.selectFirst("font")?.remove()
                 summary.text()
             }
             it.select(".manga_info li, .manga_right tr").forEach { el ->
                 when (el.selectFirst("b, label")!!.text().lowercase()) {
-                    "alternative:" -> description += "\n\n${el.text()}"
+                    "alternative:" -> alternativeTitles = el.text().substringAfter(":").trim()
                     "status:" -> status = when (el.selectFirst("span")!!.text().lowercase()) {
                         "ongoing" -> SManga.ONGOING
                         "completed" -> SManga.COMPLETED
@@ -193,10 +196,66 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
                     "genre(s):" -> genre = el.select("a").joinToString { it.text() }
                 }
             }
+
+            description = buildString {
+                append(description)
+                val names = alternativeTitles.takeUnless { it.isBlank() || it.trim().equals("none", ignoreCase = true) || it.trim().equals("N/A", ignoreCase = true) }?.let {
+                    var semicolonSeparated = it.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
+                    if (semicolonSeparated.contains(';')) {
+                        semicolonSeparated = semicolonSeparated.replace(Regex(";\\s*$"), "")
+                        semicolonSeparated.split(Regex("\\s*;\\s*"))
+                    } else {
+                        val commaSeparated = it.replace(Regex(",\\s*$"), "")
+                        commaSeparated.split(Regex("\\s*,\\s*"))
+                    }
+                }
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    ?.joinToString("\n- ", prefix = "- ")
+
+                if (!names.isNullOrEmpty()) {
+                    append("\n\n----\n#### **Alternative Titles**\n", names)
+                }
+                val matches = mutableListOf<String>()
+
+                val tempTitle = if (isRemoveTitleVersion()) {
+                    var shortName = originalTitle
+                    while (titleRegex.containsMatchIn(shortName)) {
+                        val match = titleRegex.find(shortName)!!
+                        matches.add(match.value)
+                        shortName = shortName.replace(match.value, "").trim()
+                    }
+                    shortName
+                } else {
+                    originalTitle
+                }
+
+                if (customRemoveTitle().isNotEmpty()) {
+                    val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
+                    customRegex.findAll(tempTitle).forEach { matchResult ->
+                        matches.add(matchResult.value)
+                    }
+                }
+
+                matches.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
+
+                if (matches.isNotEmpty()) {
+                    append("\n\n----\n#### **Removed from title**\n")
+                    matches.forEach { match ->
+                        append("- `$match`\n")
+                    }
+                }
+            }.trim()
         }
     }
 
-    override fun chapterListSelector() = "table#chapter_table > tbody > tr, table.uk-table > tbody > tr"
+    override fun chapterListSelector(): String {
+        return if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
+            "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
+        } else {
+            "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
+        }
+    }
 
     override fun chapterFromElement(element: Element) = SChapter.create().apply {
         val link = element.select("a.chico")
@@ -582,19 +641,34 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
     private fun isRemoveTitleVersion() = preferences.getBoolean(REMOVE_TITLE_VERSION_PREF, false)
 
+    private fun customRemoveTitle(): String =
+        preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
             key = REMOVE_TITLE_VERSION_PREF
             title = "Remove version information from entry titles"
-            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
-                "and helps identify duplicate entries in your library. " +
-                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
-                "You might also want to clear the database in advanced settings."
+            summary = "This removes version tags like '(Official)' from entry titles."
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
+            title = "Remove custom information from title"
+            summary = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+            setDefaultValue("")
+        }.let(screen::addPreference)
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_RAW_CHAPTERS_PREF
+            title = "Show raw chapters"
+            summary = "Include raw (untranslated) chapters in the chapter list."
             setDefaultValue(false)
         }.let(screen::addPreference)
         addRandomUAPreferenceToScreen(screen)
     }
     companion object {
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+        private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"
+        private const val SHOW_RAW_CHAPTERS_PREF = "SHOW_RAW_CHAPTERS"
     }
 }

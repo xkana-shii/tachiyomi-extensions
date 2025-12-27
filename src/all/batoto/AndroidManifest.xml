@@ -66,6 +66,7 @@
             <data android:host="mto.to" />
             <data android:host="*.wto.to" />
             <data android:host="wto.to" />
+            
             <data
                 android:pathPattern="/series/..*"
                 android:scheme="https" />

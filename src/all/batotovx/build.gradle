@@ -1,6 +1,6 @@
 ext {
-    extName = 'Bato.to V4'
-    extClass = '.BatoToV4Factory'
+    extName = 'Bato.to Vx'
+    extClass = '.BatoToVxFactory'
     extVersionCode = 1
     isNsfw = true
 }

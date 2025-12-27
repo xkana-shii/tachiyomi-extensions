@@ -324,6 +324,7 @@ open class BatoTo(
         val infoElement = document.select("div#mainer div.container-fluid")
         val manga = SManga.create()
         manga.title = infoElement.select("h3").text().removeEntities()
+            .cleanTitleIfNeeded()
         manga.thumbnail_url = document.select("div.attr-cover img")
             .attr("abs:src")
         manga.setUrlWithoutDomain(stripSeriesUrl(infoElement.select("h3 a").attr("abs:href")))

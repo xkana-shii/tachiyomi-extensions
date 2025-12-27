@@ -509,7 +509,11 @@ open class BatoTo(
         return Jsoup.parse(response.body.string(), response.request.url.toString(), Parser.xmlParser())
             .select("channel > item").map { item ->
                 SChapter.create().apply {
-                    setUrlWithoutDomain(item.selectFirst("guid")!!.text())
+                    val chapterUrl = item.selectFirst("guid")!!.text()
+                    val chapterId = chapterIdRegex.find(chapterUrl)
+                        ?.groupValues?.getOrNull(1)?.trim()
+                        ?: chapterUrl
+                    setUrlWithoutDomain(chapterId)
                     name = item.selectFirst("title")!!.text()
                     date_upload = parseAltChapterDate(item.selectFirst("pubDate")!!.text())
                 }
@@ -573,7 +577,11 @@ open class BatoTo(
         val group = element.select("div.extra > a:not(.ps-3)").text()
         val user = element.select("div.extra > a.ps-3").text()
         val time = element.select("div.extra > i.ps-3").text()
-        chapter.setUrlWithoutDomain(urlElement.attr("href"))
+        val chapterUrl = urlElement.attr("href")
+        val chapterId = chapterIdRegex.find(chapterUrl)
+            ?.groupValues?.getOrNull(1)?.trim()
+            ?: chapterUrl
+        chapter.setUrlWithoutDomain(chapterId)
         chapter.name = urlElement.text()
         chapter.scanlator = when {
             group.isNotBlank() -> group
@@ -648,7 +656,9 @@ open class BatoTo(
             }
             return GET(chapter.url, headers)
         }
-        return super.pageListRequest(chapter)
+        return if (chapter.url.matches(idRegex)) {
+            GET("$baseUrl/chapter/${chapter.url}", headers)
+        } else { super.pageListRequest(chapter) }
     }
 
     override fun pageListParse(document: Document): List<Page> {
@@ -1247,6 +1257,7 @@ open class BatoTo(
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
         private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
+        private val chapterIdRegex = Regex("""/chapter/(\d+)""") // /chapter/4016325
         private val idRegex = Regex("""(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val MIRROR_PREF_TITLE = "Mirror"

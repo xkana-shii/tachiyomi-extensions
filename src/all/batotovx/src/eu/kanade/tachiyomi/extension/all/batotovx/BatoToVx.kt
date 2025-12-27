@@ -70,6 +70,7 @@ open class BatoToVx(
     override fun fetchMangaDetails(manga: SManga) = _delegate.fetchMangaDetails(manga)
 
     override fun getMangaUrl(manga: SManga) = _delegate.getMangaUrl(manga)
+    override fun getChapterUrl(chapter: SChapter) = _delegate.getChapterUrl(chapter)
 
     // searchMangaRequest is not used, see fetchSearchManga instead
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = throw UnsupportedOperationException()

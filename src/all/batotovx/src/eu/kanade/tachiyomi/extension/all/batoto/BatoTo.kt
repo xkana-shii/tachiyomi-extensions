@@ -1188,7 +1188,6 @@ open class BatoTo(
             "bato.id",
             "bato.pw",
             "bato.sh",
-            "bato.to",
             "bato.vc",
             "bato.day",
             "bato.red",
@@ -1229,6 +1228,7 @@ open class BatoTo(
 
         private val DEPRECATED_MIRRORS = listOf(
             "https://batocc.com", // parked
+            "https://bato.to",
         )
 
         private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"

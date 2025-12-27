@@ -74,7 +74,7 @@ object MDConstants {
     const val contentRatingPrefValSuggestive = "suggestive"
     const val contentRatingPrefValErotica = "erotica"
     const val contentRatingPrefValPornographic = "pornographic"
-    val contentRatingPrefDefaults = setOf(contentRatingPrefValSafe, contentRatingPrefValSuggestive)
+    val contentRatingPrefDefaults = setOf(contentRatingPrefValSafe, contentRatingPrefValSuggestive, contentRatingPrefValErotica, contentRatingPrefValPornographic)
     val allContentRatings = setOf(
         contentRatingPrefValSafe,
         contentRatingPrefValSuggestive,

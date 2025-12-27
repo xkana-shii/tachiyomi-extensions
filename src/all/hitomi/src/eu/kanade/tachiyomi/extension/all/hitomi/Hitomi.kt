@@ -566,7 +566,7 @@ class Hitomi(
 
         return listOf(
             SChapter.create().apply {
-                name = "Chapter"
+                name = "Chapter 1"
                 url = gallery.galleryurl
                 scanlator = gallery.type
                 date_upload = dateFormat.tryParse(gallery.date.substringBeforeLast("-"))

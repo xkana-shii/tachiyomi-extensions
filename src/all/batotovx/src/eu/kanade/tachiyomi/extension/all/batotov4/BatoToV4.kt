@@ -4,7 +4,6 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
@@ -572,10 +571,8 @@ open class BatoToV4(
             } else {
                 manga.url
             }
-        } else if (manga.url.matches(idRegex)) {
-            "$baseUrl/title/${manga.url}"
         } else {
-            "$baseUrl${manga.url}"
+            getMangaUrl(manga)
         }
 
         // Extract comic ID from URL (format: /title/{id}/... or /title/{id}-{title}/...)
@@ -595,7 +592,11 @@ open class BatoToV4(
         val chapterListResponse = response.parseAs<ApiChapterListResponse>().data.response
 
         return chapterListResponse
-            .map { it.data.toSChapter() }
+            .map {
+                it.data.toSChapter().apply {
+                    url = chapterIdRegex.find(url)?.groupValues?.get(1) ?: url
+                }
+            }
             .reversed()
     }
 
@@ -614,7 +615,7 @@ open class BatoToV4(
                 chapter.url
             }
         } else {
-            "$baseUrl${chapter.url}"
+            getChapterUrl(chapter)
         }
 
         // Extract chapter ID from URL (format: /title/{titleId}-{title}/{chapterId}-{ch_chapterNumber})
@@ -638,7 +639,6 @@ open class BatoToV4(
     }
 
     override fun getMangaUrl(manga: SManga): String {
-        Log.e("BatoToV4", "getMangaUrl manga.url: ${manga.url}")
         return if (manga.url.matches(idRegex)) {
             "$baseUrl/title/${manga.url}"
         } else {
@@ -647,7 +647,11 @@ open class BatoToV4(
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
-        return "$baseUrl${chapter.url}"
+        return if (idRegex.matches(chapter.url)) {
+            "$baseUrl/title/chapter/${chapter.url}"
+        } else {
+            "$baseUrl${chapter.url}"
+        }
     }
 
     override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()

@@ -24,7 +24,6 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -53,9 +52,8 @@ import kotlin.text.Regex
 open class BatoToV4(
     final override val lang: String,
     private val siteLang: String,
+    private val preferences: SharedPreferences,
 ) : ConfigurableSource, ParsedHttpSource() {
-
-    private val preferences by getPreferencesLazy { migrateMirrorPref() }
 
     override val name: String = "Bato.to V4"
 
@@ -183,11 +181,11 @@ open class BatoToV4(
     private fun getUserIdPref(): String =
         preferences.getString("${USER_ID_PREF}_$lang", "")!!
 
-    private fun SharedPreferences.migrateMirrorPref() {
-        val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
+    internal fun migrateMirrorPref() {
+        val selectedMirror = preferences.getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
 
         if (selectedMirror in DEPRECATED_MIRRORS) {
-            edit().putString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE).apply()
+            preferences.edit().putString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE).apply()
         }
     }
 
@@ -709,7 +707,7 @@ open class BatoToV4(
                     }
                     // If this server also failed, close and loop to the next one
                     newResponse.close()
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     // Connection error on this mirror, ignore and loop to next
                 }
             }

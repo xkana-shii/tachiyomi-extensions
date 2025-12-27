@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.batotovx
 
+import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.batoto.BatoTo
@@ -21,9 +22,17 @@ open class BatoToVx(
 
     override val name: String = "Bato.to Vx"
 
-    override val baseUrl: String get() = _delegate.baseUrl
-
     private val preferences by getPreferencesLazy()
+
+    private fun siteVer(): String {
+        return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
+    }
+
+    private val _delegate: HttpSource =
+        when (siteVer()) {
+            "v4" -> BatoToV4(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+            else -> BatoTo(lang, siteLang, preferences).also { it.migrateMirrorPref() }
+        }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val siteVerPref = ListPreference(screen.context).apply {
@@ -33,21 +42,18 @@ open class BatoToVx(
             entryValues = SITE_VER_PREF_ENTRIES
             setDefaultValue(SITE_VER_PREF_DEFAULT_VALUE)
             summary = "%s"
+
+            setOnPreferenceChangeListener { _, _ ->
+                Toast.makeText(screen.context, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                true
+            }
         }
 
         screen.addPreference(siteVerPref)
         (_delegate as ConfigurableSource).setupPreferenceScreen(screen)
     }
 
-    private fun siteVer(): String {
-        return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
-    }
-
-    private val _delegate: HttpSource
-        get() = when (siteVer()) {
-            "v4" -> BatoToV4(lang, siteLang)
-            else -> BatoTo(lang, siteLang)
-        }
+    override val baseUrl: String get() = _delegate.baseUrl
 
     override val supportsLatest = _delegate.supportsLatest
 

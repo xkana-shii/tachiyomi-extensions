@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
@@ -182,7 +183,7 @@ open class BatoToV4(
     private fun getUserIdPref(): String =
         preferences.getString("${USER_ID_PREF}_$lang", "")!!
 
-    protected fun SharedPreferences.migrateMirrorPref() {
+    private fun SharedPreferences.migrateMirrorPref() {
         val selectedMirror = getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)!!
 
         if (selectedMirror in DEPRECATED_MIRRORS) {
@@ -344,6 +345,7 @@ open class BatoToV4(
         val mangas = browseResponse.items.map { item ->
             item.data.toSManga(baseUrl).apply {
                 title = title.cleanTitleIfNeeded()
+                url = stripSeriesUrl(url)
             }
         }
         val hasNextPage = browseResponse.paging.next != 0
@@ -533,6 +535,8 @@ open class BatoToV4(
             } else {
                 manga.url
             }
+        } else if (manga.url.matches(idRegex)) {
+            "$baseUrl/title/${manga.url}"
         } else {
             "$baseUrl${manga.url}"
         }
@@ -570,6 +574,8 @@ open class BatoToV4(
             } else {
                 manga.url
             }
+        } else if (manga.url.matches(idRegex)) {
+            "$baseUrl/title/${manga.url}"
         } else {
             "$baseUrl${manga.url}"
         }
@@ -634,7 +640,12 @@ open class BatoToV4(
     }
 
     override fun getMangaUrl(manga: SManga): String {
-        return "$baseUrl${manga.url}"
+        Log.e("BatoToV4", "getMangaUrl manga.url: ${manga.url}")
+        return if (manga.url.matches(idRegex)) {
+            "$baseUrl/title/${manga.url}"
+        } else {
+            "$baseUrl${manga.url}"
+        }
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
@@ -727,7 +738,7 @@ open class BatoToV4(
     )
 
     private fun stripSeriesUrl(url: String): String {
-        val matchResult = seriesUrlRegex.find(url)
+        val matchResult = titleIdRegex.find(url)
         return matchResult?.groups?.get(1)?.value ?: url
     }
 
@@ -746,8 +757,8 @@ open class BatoToV4(
     companion object {
         val whitespace by lazy { Regex("\\s+") }
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
-        private val seriesUrlRegex = Regex("""(.*/series/\d+)/.*""")
         private val titleIdRegex = Regex("""title/(\d+)""")
+        private val idRegex = Regex("""(\d+)""")
         private val chapterIdRegex = Regex("""title/[^/]+/(\d+)""")
         private val userIdRegex = Regex("""/u/(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"

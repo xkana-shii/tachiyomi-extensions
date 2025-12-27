@@ -56,40 +56,25 @@ open class BatoToVx(
     // ************ Search ************ //
     override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
     override fun latestUpdatesParse(response: Response) = throw UnsupportedOperationException()
-    override fun fetchLatestUpdates(page: Int): Observable<MangasPage> {
-        return _delegate.fetchLatestUpdates(page)
-    }
+    override fun fetchLatestUpdates(page: Int) = _delegate.fetchLatestUpdates(page)
 
     override fun popularMangaRequest(page: Int) = throw UnsupportedOperationException()
     override fun popularMangaParse(response: Response) = throw UnsupportedOperationException()
-    override fun fetchPopularManga(page: Int): Observable<MangasPage> {
-        return _delegate.fetchPopularManga(page)
-    }
+    override fun fetchPopularManga(page: Int) = _delegate.fetchPopularManga(page)
 
     override fun mangaDetailsParse(response: Response) = throw UnsupportedOperationException()
+    override fun fetchMangaDetails(manga: SManga) =  _delegate.fetchMangaDetails(manga)
 
-    override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
-        return _delegate.fetchMangaDetails(manga)
-    }
+    override fun getMangaUrl(manga: SManga) = _delegate.getMangaUrl(manga)
 
     // searchMangaRequest is not used, see fetchSearchManga instead
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList) = throw UnsupportedOperationException()
     override fun searchMangaParse(response: Response) = throw UnsupportedOperationException()
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
-        return _delegate.fetchSearchManga(page, query, filters)
-    }
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList) =  _delegate.fetchSearchManga(page, query, filters)
 
-    override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> {
-        return _delegate.fetchChapterList(manga)
-    }
-
-    override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
-        return _delegate.fetchPageList(chapter)
-    }
-
-    override fun fetchImageUrl(page: Page): Observable<String> {
-        return _delegate.fetchImageUrl(page)
-    }
+    override fun fetchChapterList(manga: SManga)  = _delegate.fetchChapterList(manga)
+    override fun fetchPageList(chapter: SChapter)  = _delegate.fetchPageList(chapter)
+    override fun fetchImageUrl(page: Page)  = _delegate.fetchImageUrl(page)
 
     override fun chapterListParse(response: Response) = throw UnsupportedOperationException()
     override fun pageListParse(response: Response) = throw UnsupportedOperationException()

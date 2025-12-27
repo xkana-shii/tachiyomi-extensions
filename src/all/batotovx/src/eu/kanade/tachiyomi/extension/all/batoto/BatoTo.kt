@@ -396,6 +396,9 @@ open class BatoTo(
             }
             return GET(manga.url, headers)
         }
+        if (manga.url.matches(idRegex)) {
+            return GET("$baseUrl/series/${manga.url}", headers)
+        }
         return super.mangaDetailsRequest(manga)
     }
 
@@ -476,7 +479,8 @@ open class BatoTo(
     override fun chapterListRequest(manga: SManga): Request {
         val id = seriesIdRegex.find(manga.url)
             ?.groups?.get(1)?.value?.trim()
-        return if (getAltChapterListPref() && !id.isNullOrBlank()) {
+            ?: manga.url
+        return if (getAltChapterListPref() && !id.isBlank()) {
             GET("$baseUrl/rss/series/$id.xml", headers)
         } else if (manga.url.startsWith("http")) {
             // Check if trying to use a deprecated mirror, force current mirror
@@ -486,6 +490,8 @@ open class BatoTo(
                 return GET(newHttpUrl.build(), headers)
             }
             GET(manga.url, headers)
+        } else if (manga.url.matches(idRegex)) {
+            return GET("$baseUrl/series/${manga.url}", headers)
         } else {
             super.chapterListRequest(manga)
         }
@@ -1148,8 +1154,9 @@ open class BatoTo(
 
     companion object {
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
-        private val seriesUrlRegex = Regex("""(.*/series/\d+)/.*""")
+        private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
+        private val idRegex = Regex("""(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val MIRROR_PREF_TITLE = "Mirror"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"

@@ -32,7 +32,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.FormBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -70,10 +69,7 @@ open class BatoToV4(
         val removeOfficialPref = CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
             title = "Remove version information from entry titles"
-            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
-                "and helps identify duplicate entries in your library. " +
-                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
-                "You might also want to clear the database in advanced settings."
+            summary = "This removes version tags like '(Official)' from entry titles."
             setDefaultValue(false)
         }
         val removeCustomPref = EditTextPreference(screen.context).apply {
@@ -191,9 +187,7 @@ open class BatoToV4(
     override val supportsLatest = true
     private val json: Json by injectLazy()
 
-    override val client = network.cloudflareClient.newBuilder().apply {
-        addInterceptor(::imageFallbackInterceptor)
-    }.build()
+    override val client = network.cloudflareClient
 
     // ************ Search ************ //
     override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
@@ -553,9 +547,74 @@ open class BatoToV4(
         val comicData = result.data.response.data
         val manga = comicData.toSManga(baseUrl)
 
-        manga.title = manga.title.cleanTitleIfNeeded()
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = manga.title
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+        manga.title = cleanedTitle
+
+        // Only touch description if something was removed from title
+        if (removedParts.isNotEmpty()) {
+            manga.description = (
+                manga.description.orEmpty() +
+                    "\n\n----\n#### **Removed From Title**\n" +
+                    removedParts.joinToString("") { "- `$it`\n" }
+                ).trim().let { autoMarkdownLinks(it) }
+        } else {
+            manga.description = manga.description?.let { autoMarkdownLinks(it) }
+        }
 
         return manga
+    }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = when {
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
+                        else -> try {
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
+                        } catch (_: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
+                    }
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
+                } catch (_: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
     }
 
     override fun mangaDetailsParse(document: Document): SManga = throw UnsupportedOperationException()
@@ -671,56 +730,6 @@ open class BatoToV4(
         return tempTitle.trim()
     }
 
-    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val response = chain.proceed(request)
-
-        if (response.isSuccessful) return response
-
-        val urlString = request.url.toString()
-
-        // We know the first attempt failed. Close the response body to release the
-        // connection from the pool and prevent resource leaks before we start the retry loop.
-        // This is critical; otherwise, new requests in the loop may hang or fail.
-        response.close()
-
-        if (SERVER_PATTERN.containsMatchIn(urlString)) {
-            // Sorted list: Most reliable servers FIRST
-            val servers = listOf("k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09", "n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10")
-
-            for (server in servers) {
-                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-
-                // Skip if we are about to try the exact same URL that just failed
-                if (newUrl == urlString) continue
-
-                val newRequest = request.newBuilder()
-                    .url(newUrl)
-                    .build()
-
-                try {
-                    // FORCE SHORT TIMEOUTS FOR FALLBACKS
-                    // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
-                    val newResponse = chain
-                        .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                        .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                        .proceed(newRequest)
-
-                    if (newResponse.isSuccessful) {
-                        return newResponse
-                    }
-                    // If this server also failed, close and loop to the next one
-                    newResponse.close()
-                } catch (_: Exception) {
-                    // Connection error on this mirror, ignore and loop to next
-                }
-            }
-        }
-
-        // If everything failed, re-run original request to return the standard error
-        return chain.proceed(request)
-    }
-
     override fun getFilterList() = FilterList(
         SortFilter(SortFilter.POPULAR_INDEX),
         OriginalStatusFilter(),
@@ -758,7 +767,6 @@ open class BatoToV4(
 
     companion object {
         val whitespace by lazy { Regex("\\s+") }
-        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
         private val titleIdRegex = Regex("""title/(\d+)""")
         private val idRegex = Regex("""(\d+)""")
         private val chapterIdRegex = Regex("""title/[^/]+/(\d+)""")
@@ -783,6 +791,6 @@ open class BatoToV4(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaTypeOrNull()
 
         private val titleRegex: Regex =
-            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|/Official|/ Official", RegexOption.IGNORE_CASE)
+            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
     }
 }

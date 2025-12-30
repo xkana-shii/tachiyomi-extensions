@@ -53,18 +53,18 @@ class SortFilter(
         get() = options[state!!.index].value
 
     companion object {
-        public const val POPULAR_INDEX = 0 // field_score
-        public const val LATEST_INDEX = 5 // field_upload
+        public const val POPULAR_INDEX = 8 // field_score
+        public const val LATEST_INDEX = 1 // field_upload
 
         private val options = listOf(
+            SelectFilterOption("Name A-Z", "field_name"),
+            SelectFilterOption("Latest Upload", "field_upload"),
+            SelectFilterOption("Recently Created", "field_public"),
             SelectFilterOption("Rating Score", "field_score"),
             SelectFilterOption("Most Follows", "field_follow"),
             SelectFilterOption("Most Reviews", "field_review"),
             SelectFilterOption("Most Comments", "field_comment"),
             SelectFilterOption("Most Chapters", "field_chapter"),
-            SelectFilterOption("Latest Upload", "field_upload"),
-            SelectFilterOption("Recently Created", "field_public"),
-            SelectFilterOption("Name A-Z", "field_name"),
             SelectFilterOption("Most Views (Total)", "views_d000"),
             SelectFilterOption("Most Views (360 days)", "views_d360"),
             SelectFilterOption("Most Views (180 days)", "views_d180"),

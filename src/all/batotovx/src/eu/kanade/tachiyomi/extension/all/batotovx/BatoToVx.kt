@@ -12,7 +12,9 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.utils.getPreferencesLazy
+import okhttp3.Interceptor
 import okhttp3.Response
+import java.util.concurrent.TimeUnit
 import kotlin.getValue
 
 open class BatoToVx(
@@ -20,16 +22,99 @@ open class BatoToVx(
     private val siteLang: String,
 ) : ConfigurableSource, HttpSource() {
 
-    override val name: String = "Bato.to Vx"
+    override val name: String = "Bato.to VX"
+
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .build()
 
     private val preferences by getPreferencesLazy()
 
     private fun siteVer(): String {
         return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
     }
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
 
-    private val _delegate: HttpSource =
-        when (siteVer()) {
+        if (response.isSuccessful) return response
+
+        val urlString = request.url.toString()
+
+        // We know the first attempt failed. Close the response body to release the
+        // connection from the pool and prevent resource leaks before we start the retry loop.
+        // This is critical; otherwise, new requests in the loop may hang or fail.
+        response.close()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            val regex = Regex("""https://([kn])(\d{2})""")
+            val match = regex.find(urlString)
+            if (match != null) {
+                val (currentLetter, number) = match.destructured
+                // swap just the letter between 'k' and 'n'
+                val fallbackLetter = if (currentLetter == "k") "n" else "k"
+                val newUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
+                if (newUrl != urlString) {
+                    val newRequest = request.newBuilder()
+                        .url(newUrl)
+                        .build()
+                    try {
+                        val newResponse = chain
+                            .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                            .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                            .proceed(newRequest)
+                        if (newResponse.isSuccessful) {
+                            return newResponse
+                        }
+                        newResponse.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            // (keep fallback server loop here unchanged)
+            val servers = listOf(
+                "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
+                "k05", "k07",
+                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
+            )
+
+            for (server in servers) {
+                if (urlString.contains("https://$server")) continue
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                // Skip if we are about to try the exact same URL that just failed
+                if (newUrl == urlString) continue
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    // FORCE SHORT TIMEOUTS FOR FALLBACKS
+                    // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
+                    val newResponse = chain
+                        .withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+                    // If this server also failed, close and loop to the next one
+                    newResponse.close()
+                } catch (_: Exception) {
+                    // Connection error on this mirror, ignore and loop to next
+                }
+            }
+        }
+
+        // If everything failed, re-run original request to return the standard error
+        return chain.proceed(request)
+    }
+
+    private val _delegate: HttpSource
+        get() = when (siteVer()) {
             "v4" -> BatoToV4(lang, siteLang, preferences).also { it.migrateMirrorPref() }
             else -> BatoTo(lang, siteLang, preferences).also { it.migrateMirrorPref() }
         }
@@ -88,6 +173,7 @@ open class BatoToVx(
     override fun getFilterList() = _delegate.getFilterList()
 
     companion object {
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
         private const val SITE_VER_PREF_KEY = "SITE_VER"
         private const val SITE_VER_PREF_TITLE = "Site version"
         private val SITE_VER_PREF_ENTRIES = arrayOf(

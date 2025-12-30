@@ -149,7 +149,7 @@ data class ApiComicNodeResponse(
                     title = name
                     author = authors?.joinToString()
                     artist = artists?.joinToString()
-                    genre = genres?.joinToString { genre -> // Map to the canonical name
+                    genre = genres?.joinToString { genre ->
                         GenreGroupFilter.options.find { it.value == genre }?.name ?: genre
                     }
                     status = run {
@@ -170,18 +170,16 @@ data class ApiComicNodeResponse(
                     thumbnail_url = "$baseUrl${urlCoverOri ?: urlCover600 ?: urlCover900 ?: urlCover300}"
                     description = buildString {
                         if (!summary.isNullOrEmpty()) {
-                            append(summary)
+                            append("\n\n----\n#### **Summary**\n$summary")
                         }
                         if (!extraInfo.isNullOrEmpty()) {
-                            if (isNotEmpty()) append("\n\nExtra Info:\n")
-                            append(extraInfo)
+                            append("\n\n----\n#### **Extra Info**\n$extraInfo")
                         }
                         if (!altNames.isNullOrEmpty()) {
-                            if (isNotEmpty()) append("\n\n")
-                            append("Alternative Titles:\n")
-                            append(altNames.joinToString("\n") { "• $it" })
+                            append("\n\n----\n#### **Alternative Titles**\n")
+                            append(altNames.joinToString("\n- ", prefix = "- "))
                         }
-                    }
+                    }.trim()
                 }
             }
         }

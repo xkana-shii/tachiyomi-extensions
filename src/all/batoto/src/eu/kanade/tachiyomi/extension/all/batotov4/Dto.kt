@@ -63,18 +63,16 @@ class ComicNode(
         thumbnail_url = urlCoverOri?.let { "$baseUrl$it" }
         description = buildString {
             if (!summary.isNullOrEmpty()) {
-                append(summary)
+                append("\n\n----\n#### **Summary**\n$summary")
             }
             if (!extraInfo.isNullOrEmpty()) {
-                if (isNotEmpty()) append("\n\nExtra Info:\n")
-                append(extraInfo)
+                append("\n\n----\n#### **Extra Info**\n$extraInfo")
             }
             if (!altNames.isNullOrEmpty()) {
-                if (isNotEmpty()) append("\n\n")
-                append("Alternative Titles:\n")
-                append(altNames.joinToString("\n") { "- $it" })
+                append("\n\n----\n#### **Alternative Titles**\n")
+                append(altNames.joinToString("\n- ", prefix = "- "))
             }
-        }.replace(urlRegex, "<$1>")
+        }.trim().replace(urlRegex, "<$1>")
         initialized = true
     }
 }

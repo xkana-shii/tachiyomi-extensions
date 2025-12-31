@@ -426,7 +426,7 @@ open class BatoToV2(
     }
     
     private fun autoMarkdownLinks(input: String): String {
-        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?[a-zA-Z0-9.-]+\.[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
         return urlRegex.replace(input) { matchResult ->
             val url = matchResult.value
             val start = matchResult.range.first

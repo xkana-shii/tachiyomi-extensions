@@ -445,6 +445,34 @@ class BatoToV4(
         val urlString = request.url.toString()
 
         if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            val regex = Regex("""https://([kn])(\d{2})""")
+            val match = regex.find(urlString)
+            if (match != null) {
+                val (currentLetter, number) = match.destructured
+                val fallbackLetter = if (currentLetter == "k") "n" else "k"
+                val swappedUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
+
+                if (swappedUrl != urlString) {
+                    val swappedRequest = request.newBuilder()
+                        .url(swappedUrl)
+                        .build()
+
+                    try {
+                        val swappedResponse = chain
+                            .withConnectTimeout(5, TimeUnit.SECONDS)
+                            .withReadTimeout(10, TimeUnit.SECONDS)
+                            .proceed(swappedRequest)
+
+                        if (swappedResponse.isSuccessful) {
+                            return swappedResponse
+                        }
+
+                        swappedResponse.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
             // Sorted list: Most reliable servers FIRST
             val servers = listOf("n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10", "k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09")
 

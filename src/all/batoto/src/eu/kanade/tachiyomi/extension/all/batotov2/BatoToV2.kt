@@ -382,35 +382,49 @@ open class BatoToV2(
         val workStatus = infoElement.selectFirst("div.attr-item:contains(original work) span")?.text()
         val uploadStatus = infoElement.selectFirst("div.attr-item:contains(upload status) span")?.text()
         val originalTitle = infoElement.select("h3").text().removeEntities()
+
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = originalTitle
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+
         val description = buildString {
-            append(infoElement.select("div.limit-html").text())
+            infoElement.selectFirst("h5:containsOwn(Summary:) + div #limit-height-ctrl-summary #limit-height-body-summary .limit-html")?.also {
+                append("\n\n----\n#### **Summary**\n${it.wholeText()}")
+            }
             infoElement.selectFirst(".episode-list > .alert-warning")?.also {
                 append("\n\n${it.text()}")
             }
             infoElement.selectFirst("h5:containsOwn(Extra Info:) + div")?.also {
-                append("\n\nExtra Info:\n${it.wholeText()}")
+                append("\n\n----\n#### **Extra Info**\n${it.wholeText()}")
             }
             document.selectFirst("div.pb-2.alias-set.line-b-f")?.takeIf { it.hasText() }?.also {
-                append("\n\nAlternative Titles:\n")
-                append(it.text().split('/').joinToString("\n") { "• ${it.trim()}" })
+                append("\n\n----\n#### **Alternative Titles**\n")
+                append(it.text().split('/').joinToString("\n- ", prefix = "- "))
             }
-        }.trim()
-        val cleanedTitle = originalTitle.cleanTitleIfNeeded()
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- `$it`\n") }
+            }
+        }.trim().let { desc -> autoMarkdownLinks(desc) }
 
         manga.title = cleanedTitle
         manga.author = infoElement.select("div.attr-item:contains(author) span").text()
         manga.artist = infoElement.select("div.attr-item:contains(artist) span").text()
         manga.status = parseStatus(workStatus, uploadStatus)
         manga.genre = infoElement.select(".attr-item b:contains(genres) + span ").joinToString { it.text() }
-        manga.description = if (originalTitle.trim() != cleanedTitle) {
-            listOf(originalTitle, description)
-                .joinToString("\n\n")
-        } else {
-            description
-        }
+        manga.description = description
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
+    
     private fun parseStatus(workStatus: String?, uploadStatus: String?): Int {
         val status = workStatus ?: uploadStatus
         return when {

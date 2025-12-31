@@ -9,6 +9,7 @@ import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.extension.all.batotov2.BatoToV2
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -436,13 +437,14 @@ class BatoToV4(
         val request = chain.request()
         val response = chain.proceed(request)
 
-        if (request.url.fragment != PAGE_FRAGMENT || response.isSuccessful) {
-            return response
-        }
-
-        response.closeQuietly()
+        if (response.isSuccessful) return response
 
         val urlString = request.url.toString()
+
+        // We know the first attempt failed. Close the response body to release the
+        // connection from the pool and prevent resource leaks before we start the retry loop.
+        // This is critical; otherwise, new requests in the loop may hang or fail.
+        response.close()
 
         if (SERVER_PATTERN.containsMatchIn(urlString)) {
             // Sorted list: Most reliable servers FIRST
@@ -451,11 +453,16 @@ class BatoToV4(
             for (server in servers) {
                 val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
 
+                // Skip if we are about to try the exact same URL that just failed
+                if (newUrl == urlString) continue
+
                 val newRequest = request.newBuilder()
                     .url(newUrl)
                     .build()
 
                 try {
+                    // FORCE SHORT TIMEOUTS FOR FALLBACKS
+                    // If a fallback server doesn't answer in 5 seconds, kill it and move to next.
                     val newResponse = chain
                         .withConnectTimeout(5, TimeUnit.SECONDS)
                         .withReadTimeout(10, TimeUnit.SECONDS)
@@ -464,7 +471,7 @@ class BatoToV4(
                     if (newResponse.isSuccessful) {
                         return newResponse
                     }
-
+                    // If this server also failed, close and loop to the next one
                     newResponse.close()
                 } catch (_: Exception) {
                     // Connection error on this mirror, ignore and loop to next
@@ -472,6 +479,7 @@ class BatoToV4(
             }
         }
 
+        // If everything failed, re-run original request to return the standard error
         return chain.proceed(request)
     }
 

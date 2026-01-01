@@ -338,7 +338,74 @@ class BatoToV4(
         val result = response.parseAs<ApiComicNodeResponse>()
         val comicData = result.data.response.data
 
-        return comicData.toSManga(baseUrl, ::cleanTitleIfNeeded)
+        val manga = comicData.toSManga(baseUrl, ::cleanTitleIfNeeded)
+
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = manga.title
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+
+        val description = buildString {
+            if (!manga.description.isNullOrBlank()) append(manga.description)
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- `$it`\n") }
+            }
+        }.trim().let { autoMarkdownLinks(it) }
+
+        manga.description = description
+
+        return manga
+    }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = when {
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
+                        else -> try {
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
+                        } catch (_: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
+                    }
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
+                } catch (_: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
     }
 
     override fun getMangaUrl(manga: SManga): String {

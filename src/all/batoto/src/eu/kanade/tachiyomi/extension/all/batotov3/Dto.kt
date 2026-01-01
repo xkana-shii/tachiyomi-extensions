@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
+import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
+import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.chapterIdRegex
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
@@ -123,104 +125,91 @@ enum class CoverQuality {
     Low,
 }
 
-// ************ Chapter List ************ //
-@Serializable
-data class ApiChapterListVariables(
-    val comicId: String,
-    val start: Int, // set to -1 to grab all chapters
-)
-
 @Serializable
 data class ApiChapterListResponse(
-    val data: ChapterListData,
+    val data: ChapterList,
 ) {
     @Serializable
-    data class ChapterListData(
-        @SerialName("get_content_chapterList") val response: List<ChapterNode>,
+    data class ChapterList(
+        @SerialName("get_content_chapterList") val chapters: List<ChapterData>,
     ) {
         @Serializable
-        data class ChapterNode(
-            val data: ChapterData,
+        data class ChapterData(
+            val data: ChapterDto,
         ) {
             @Serializable
-            data class ChapterData(
+            data class ChapterDto(
                 val id: String,
-                val dname: String? = null,
                 val title: String? = null,
+                val chaNum: Float,
                 val urlPath: String,
-                val dateCreate: Long? = null,
-                val dateModify: Long? = null,
-                val userNode: UserNode? = null,
-                val groupNode: GroupNode? = null,
+                val dateCreate: JsonPrimitive? = null,
+                val dateModify: JsonPrimitive? = null,
+                @SerialName("userNode") val user: ScanlatorNode? = null,
+                @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
-                @Serializable
-                data class UserNode(
-                    val data: UserData,
-                ) {
-
-                    @Serializable
-                    data class UserData(
-                        val name: String? = null,
-                    )
-                }
-
-                @Serializable
-                data class GroupNode(
-                    val data: GroupData,
-                ) {
-
-                    @Serializable
-                    data class GroupData(
-                        val name: String? = null,
-                    )
-                }
-
-                fun toSChapter(): SChapter = SChapter.create().apply {
+                fun toSChapter() = SChapter.create().apply {
                     url = urlPath
-                    name = buildString {
-                        if (!dname.isNullOrEmpty()) {
-                            append(dname)
+                    name = "Chapter ${chaNum.parseChapterNumber()}"
+                    if (!title.isNullOrEmpty()) {
+                        name += ": $title"
+                    }
+                    chapter_number = chaNum
+                    if (!groups.isNullOrEmpty()) {
+                        scanlator = groups
+                            .filterNot { it.data.name.isNullOrEmpty() }
+                            .joinToString { it.data.name?.trim().toString() }
+                    } else if (user != null && user.data.name != null) {
+                        scanlator = "Uploaded by ${user.data.name.trim()}"
+                    }
+                    date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
+                }
+
+                private fun Float.parseChapterNumber(): String {
+                    return this.toString().replace(chapterIdRegex, "")
+                }
+
+                private fun JsonPrimitive.parseDate(): Long? {
+                    // api sometimes return string and sometimes long 🗿
+                    return runCatching {
+                        if (this.isString) {
+                            DATE_FORMATTER.parse(this.toString())!!.time
+                        } else {
+                            return this.long
                         }
-                        if (!title.isNullOrEmpty()) {
-                            if (isNotEmpty()) append(": ")
-                            append(title)
-                        }
-                    }.ifEmpty { "Unnamed Chapter: $id" }
-                    date_upload = dateModify ?: dateCreate ?: 0L
-                    scanlator = groupNode?.data?.name ?: userNode?.data?.name ?: "Unknown"
+                    }.getOrNull()
+                }
+
+                @Serializable
+                data class ScanlatorNode(
+                    val data: NameDto,
+                ) {
+                    @Serializable
+                    data class NameDto(
+                        val name: String? = null,
+                    )
                 }
             }
         }
     }
 }
 
-// ************ Chapter Pages ************ //
 @Serializable
-data class ApiChapterNodeVariables(
-    val id: String,
-)
-
-@Serializable
-data class ApiChapterNodeResponse(
-    val data: ChapterNodeData,
+data class ApiPageListResponse(
+    val data: ChapterNode,
 ) {
     @Serializable
-    data class ChapterNodeData(
-        @SerialName("get_chapterNode") val response: ChapterNode,
+    data class ChapterNode(
+        @SerialName("get_content_chapterNode") val pageList: PageList,
     ) {
         @Serializable
-        data class ChapterNode(
-            val data: ChapterData,
+        data class PageList(
+            val data: PageData,
         ) {
             @Serializable
-            data class ChapterData(
-                val imageFile: ChapterImageFile,
-            ) {
-                @Serializable
-                data class ChapterImageFile(
-                    val urlList: List<String>,
-                )
-            }
+            data class PageData(
+                val imageFiles: List<String>? = emptyList(),
+            )
         }
     }
 }

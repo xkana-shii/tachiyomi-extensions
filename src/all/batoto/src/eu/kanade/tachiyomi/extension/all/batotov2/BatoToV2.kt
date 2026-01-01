@@ -52,7 +52,7 @@ open class BatoToV2(
     private val preferences: SharedPreferences,
 ) : ConfigurableSource, ParsedHttpSource() {
 
-    override val name: String = "Bato.to"
+    override val name: String = "Bato.to V2"
 
     override val baseUrl: String
         get() {
@@ -424,7 +424,7 @@ open class BatoToV2(
         manga.thumbnail_url = document.select("div.attr-cover img").attr("abs:src")
         return manga
     }
-    
+
     private fun autoMarkdownLinks(input: String): String {
         val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
         return urlRegex.replace(input) { matchResult ->

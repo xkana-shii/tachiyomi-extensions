@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-
 private fun buildQuery(queryAction: () -> String): String {
     return queryAction()
         .trimIndent()

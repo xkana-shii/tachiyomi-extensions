@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
@@ -19,42 +18,49 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
-import keiyoushi.utils.parseAs
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import rx.Observable
-import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
-import uy.kohesive.injekt.injectLazy
-import kotlin.getValue
-import kotlin.random.Random
+import java.text.SimpleDateFormat
+import java.util.Locale
 
-open class BatoToV3(
+class BatoToV3(
     final override val lang: String,
     private val siteLang: String,
     private val preferences: SharedPreferences,
-    ) : ConfigurableSource, HttpSource() {
-
+) : ConfigurableSource, HttpSource() {
 
     override val name: String = "Bato.to V3"
 
-    override val baseUrl: String get() = getMirrorPref()
+    override val baseUrl: String
+        get() {
+            val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
+                .coerceAtMost(mirrors.size - 1)
+
+            return mirrors[index]
+        }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val mirrorPref = ListPreference(screen.context).apply {
-            key = "${MIRROR_PREF_KEY}_$lang"
-            title = MIRROR_PREF_TITLE
-            entries = MIRROR_PREF_ENTRIES
-            entryValues = MIRROR_PREF_ENTRY_VALUES
-            setDefaultValue(MIRROR_PREF_DEFAULT_VALUE)
+            key = MIRROR_PREF_KEY
+            title = "Preferred Mirror"
+            entries = mirrors
+            entryValues = Array(mirrors.size) { it.toString() }
             summary = "%s"
+            setDefaultValue("0")
+        }
+        val altChapterListPref = CheckBoxPreference(screen.context).apply {
+            key = "${ALT_CHAPTER_LIST_PREF_KEY}_$lang"
+            title = ALT_CHAPTER_LIST_PREF_TITLE
+            summary = ALT_CHAPTER_LIST_PREF_SUMMARY
+            setDefaultValue(ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE)
         }
         val removeOfficialPref = CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
@@ -101,89 +107,30 @@ open class BatoToV3(
                 isValid
             }
         }
-        val userIdPref = EditTextPreference(screen.context).apply {
-            key = "${USER_ID_PREF}_$lang"
-            title = "User ID (Default Auto-Detect)"
-            summary = if (getUserIdPref().isNotEmpty()) {
-                "Manually Provided ID: ${getUserIdPref()}"
-            } else {
-                "Auto-detect from logged-in user"
-            }
-            setDefaultValue("")
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val newId = newValue as String
-                summary = if (newId.isNotEmpty()) {
-                    // Validate it's numeric
-                    if (newId.matches(Regex("\\d+"))) {
-                        "Manually Provided ID: $newId"
-                    } else {
-                        Toast.makeText(screen.context, "User ID must be numeric", Toast.LENGTH_SHORT).show()
-                        return@setOnPreferenceChangeListener false
-                    }
-                } else {
-                    "Auto-detect from logged-in user"
-                }
-                true
-            }
-        }
         screen.addPreference(mirrorPref)
+        screen.addPreference(altChapterListPref)
         screen.addPreference(removeOfficialPref)
         screen.addPreference(removeCustomPref)
-        screen.addPreference(userIdPref)
     }
 
-    private fun getMirrorPref(): String {
-        if (System.getenv("CI") == "true") {
-            return (MIRROR_PREF_ENTRY_VALUES.drop(1) + DEPRECATED_MIRRORS).joinToString("#, ")
-        }
-
-        return preferences.getString("${MIRROR_PREF_KEY}_$lang",
-            MIRROR_PREF_DEFAULT_VALUE
-        )
-            ?.takeUnless { it == MIRROR_PREF_DEFAULT_VALUE }
-            ?: let {
-                /* Semi-sticky mirror:
-                 * - Don't randomize on boot
-                 * - Don't randomize per language
-                 * - Fallback for non-Android platform
-                 */
-                val seed = runCatching {
-                    val pm = Injekt.get<Application>().packageManager
-                    pm.getPackageInfo(BuildConfig.APPLICATION_ID, 0).lastUpdateTime
-                }.getOrElse {
-                    BuildConfig.VERSION_NAME.hashCode().toLong()
-                }
-
-                MIRROR_PREF_ENTRY_VALUES.drop(1).random(Random(seed))
-            }
-    }
-
+    private fun getAltChapterListPref(): Boolean = preferences.getBoolean(
+        "${ALT_CHAPTER_LIST_PREF_KEY}_$lang",
+        ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE,
+    )
     private fun isRemoveTitleVersion(): Boolean {
         return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
     }
     private fun customRemoveTitle(): String =
         preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
 
-    private fun getUserIdPref(): String =
-        preferences.getString("${USER_ID_PREF}_$lang", "")!!
-
-    internal fun migrateMirrorPref() {
-        val selectedMirror = preferences.getString("${MIRROR_PREF_KEY}_$lang",
-            MIRROR_PREF_DEFAULT_VALUE
-        )!!
-
-        if (selectedMirror in DEPRECATED_MIRRORS) {
-            preferences.edit().putString("${MIRROR_PREF_KEY}_$lang",
-                MIRROR_PREF_DEFAULT_VALUE
-            ).apply()
-        }
-    }
-
     override val supportsLatest = true
 
-    private val json: Json by injectLazy()
-
+    private val json: Json = Json {
+        ignoreUnknownKeys = true
+        explicitNulls = false
+        encodeDefaults = true
+        coerceInputValues = true
+    }
 
     override val client: OkHttpClient = super.client.newBuilder()
         .rateLimit(4)
@@ -214,7 +161,7 @@ open class BatoToV3(
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val payloadObj = ApiSearchPayload(
             pageNumber = page,
-            size = BROWSE_PAGE_SIZE,
+            size = 30,
             query = query.trim(),
             incTLangs = siteLang,
             sort = filters.firstInstanceOrNull<SortFilter>()?.selected,
@@ -274,15 +221,11 @@ open class BatoToV3(
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val chapterListResponse = response.parseAs<ApiChapterListResponse>().data.response
+        val chapterList = response.parseAs<ApiChapterListResponse>()
 
-        return chapterListResponse
-            .map {
-                it.data.toSChapter().apply {
-                    url = chapterIdRegex.find(url)?.groupValues?.get(1) ?: url
-                }
-            }
-            .reversed()
+        return chapterList.data.chapters
+            .map { it.data.toSChapter() }
+            .sortedByDescending { it.chapter_number }
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
@@ -290,27 +233,14 @@ open class BatoToV3(
     }
 
     override fun pageListRequest(chapter: SChapter): Request {
-        // Force current mirror if on a deprecated mirror
-        val chapterUrl = if (chapter.url.startsWith("http")) {
-            val httpUrl = chapter.url.toHttpUrl()
-            if ("https://${httpUrl.host}" in DEPRECATED_MIRRORS) {
-                val newHttpUrl = httpUrl.newBuilder().host(getMirrorPref().toHttpUrl().host)
-                newHttpUrl.build().toString()
-            } else {
-                chapter.url
-            }
-        } else {
-            getChapterUrl(chapter)
-        }
+        val id = chapter.url
+            .removeSuffix("/")
+            .substringAfterLast("/")
+            .substringBefore("-")
 
-        // Extract chapter ID from URL (format: /title/{titleId}-{title}/{chapterId}-{ch_chapterNumber})
-        val id = chapterIdRegex.find(chapterUrl)?.groupValues?.get(1)
-            ?: throw Exception("Could not extract chapter ID from URL: $chapterUrl")
+        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
 
-        val apiVariables = ApiChapterNodeVariables(id = id)
-        val query = CHAPTER_NODE_QUERY
-
-        return sendGraphQLRequest(apiVariables, query)
+        return apiRequest(payloadObj)
     }
 
     override fun pageListParse(response: Response): List<Page> {
@@ -322,7 +252,7 @@ open class BatoToV3(
     }
 
     override fun imageUrlParse(response: Response): String {
-        throw UnsupportedOperationException()
+        throw UnsupportedOperationException("Not Used")
     }
 
     private inline fun <reified R> List<*>.firstInstanceOrNull(): R? =
@@ -343,86 +273,89 @@ open class BatoToV3(
     }
 
     companion object {
-        private val titleIdRegex = Regex("""title/(\d+)""")
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
+        private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
+        private val seriesIdRegex = Regex("""series/(\d+)""")
+        internal val chapterIdRegex = Regex("""/chapter/(\d+)""") // /chapter/4016325
         private val idRegex = Regex("""(\d+)""")
-        private val chapterIdRegex = Regex("""title/[^/]+/(\d+)""")
-        private val userIdRegex = Regex("""/u/(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
-        private const val MIRROR_PREF_TITLE = "Mirror"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
         private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"
-        private const val USER_ID_PREF = "USER_ID"
-        private val MIRROR_PREF_ENTRIES = arrayOf(
-            "Auto",
-            // https://batotomirrors.pages.dev/
-            "ato.to",
-            "dto.to",
-            "fto.to",
-            "hto.to",
-            "jto.to",
-            "lto.to",
-            "mto.to",
-            "nto.to",
-            "vto.to",
-            "wto.to",
-            "xto.to",
-            "yto.to",
-            "vba.to",
-            "wba.to",
-            "xba.to",
-            "yba.to",
-            "zba.to",
-            "bato.ac",
-            "bato.bz",
-            "bato.cc",
-            "bato.cx",
-            "bato.id",
-            "bato.pw",
-            "bato.sh",
-            "bato.vc",
-            "bato.day",
-            "bato.red",
-            "bato.run",
-            "batoto.in",
-            "batoto.tv",
-            "batotoo.com",
-            "batotwo.com",
-            "batpub.com",
-            "batread.com",
-            "battwo.com",
-            "xbato.com",
-            "xbato.net",
-            "xbato.org",
-            "zbato.com",
-            "zbato.net",
-            "zbato.org",
-            "comiko.net",
-            "comiko.org",
-            "mangatoto.com",
-            "mangatoto.net",
-            "mangatoto.org",
-            "batocomic.com",
-            "batocomic.net",
-            "batocomic.org",
-            "readtoto.com",
-            "readtoto.net",
-            "readtoto.org",
-            "kuku.to",
-            "okok.to",
-            "ruru.to",
-            "xdxd.to",
-            // "bato.si", // (v4)
-            // "bato.ing", // (v4)
+
+        // https://batotomirrors.pages.dev/
+        private val mirrors = arrayOf(
+            "https://ato.to",
+            "https://dto.to",
+            "https://fto.to",
+            "https://hto.to",
+            "https://jto.to",
+            "https://lto.to",
+            "https://mto.to",
+            "https://nto.to",
+            "https://vto.to",
+            "https://wto.to",
+            "https://xto.to",
+            "https://yto.to",
+            "https://vba.to",
+            "https://wba.to",
+            "https://xba.to",
+            "https://yba.to",
+            "https://zba.to",
+            "https://bato.ac",
+            "https://bato.bz",
+            "https://bato.cc",
+            "https://bato.cx",
+            "https://bato.id",
+            "https://bato.pw",
+            "https://bato.sh",
+            "https://bato.to",
+            "https://bato.vc",
+            "https://bato.day",
+            "https://bato.red",
+            "https://bato.run",
+            "https://batoto.in",
+            "https://batoto.tv",
+            "https://batotoo.com",
+            "https://batotwo.com",
+            "https://batpub.com",
+            "https://batread.com",
+            "https://battwo.com",
+            "https://xbato.com",
+            "https://xbato.net",
+            "https://xbato.org",
+            "https://zbato.com",
+            "https://zbato.net",
+            "https://zbato.org",
+            "https://comiko.net",
+            "https://comiko.org",
+            "https://mangatoto.com",
+            "https://mangatoto.net",
+            "https://mangatoto.org",
+            "https://batocomic.com",
+            "https://batocomic.net",
+            "https://batocomic.org",
+            "https://readtoto.com",
+            "https://readtoto.net",
+            "https://readtoto.org",
+            "https://kuku.to",
+            "https://okok.to",
+            "https://ruru.to",
+            "https://xdxd.to",
         )
 
-        private val MIRROR_PREF_ENTRY_VALUES = MIRROR_PREF_ENTRIES.map { "https://$it" }.toTypedArray()
-        private val MIRROR_PREF_DEFAULT_VALUE = MIRROR_PREF_ENTRY_VALUES[0]
+        private val DEPRECATED_MIRRORS = listOf(
+            "https://batocc.com", // parked
+        )
 
-        private val DEPRECATED_MIRRORS = listOf<String>()
+        private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"
+        private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"
+        private const val ALT_CHAPTER_LIST_PREF_SUMMARY = "If checked, uses an alternate chapter list"
+        private const val ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE = false
 
-        private const val BROWSE_PAGE_SIZE = 36
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaTypeOrNull()
-
+        val DATE_FORMATTER by lazy {
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.ENGLISH)
+        }
         private val titleRegex: Regex =
             Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
     }

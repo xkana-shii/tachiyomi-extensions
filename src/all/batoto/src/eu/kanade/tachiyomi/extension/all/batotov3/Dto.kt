@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
 import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
-import eu.kanade.tachiyomi.extension.all.batotov4.Data
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
@@ -9,6 +8,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.long
 import java.util.Locale
+
+@Serializable
+class Data<T>(
+    val data: T,
+)
 
 @Serializable
 data class ApiSearchResponse(

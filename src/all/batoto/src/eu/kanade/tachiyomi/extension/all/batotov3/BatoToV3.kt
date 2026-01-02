@@ -169,7 +169,7 @@ class BatoToV3(
         val incTLangs: List<String> = if (siteLang.isEmpty()) emptyList() else listOf(siteLang)
         val payloadObj = ApiSearchPayload(
             pageNumber = page,
-            size = 30,
+            size = BROWSE_PAGE_SIZE,
             query = query.trim(),
             incTLangs = incTLangs,
             sort = filters.firstInstanceOrNull<SortFilter>()?.selected,
@@ -516,6 +516,7 @@ class BatoToV3(
             "https://batocc.com", // parked
         )
 
+        private const val BROWSE_PAGE_SIZE = 36
         private const val PAGE_FRAGMENT = "page"
         private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"
         private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"

@@ -1,10 +1,13 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
+import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
 import eu.kanade.tachiyomi.extension.all.batotov4.Data
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.long
 import java.util.Locale
 
 @Serializable
@@ -142,8 +145,8 @@ data class ApiChapterListResponse(
                 @SerialName("dname")
                 val displayName: String,
                 val title: String? = null,
-                val dateCreate: Long? = null,
-                val dateModify: Long? = null,
+                val dateCreate: JsonPrimitive? = null,
+                val dateModify: JsonPrimitive? = null,
                 val userNode: Data<Name?>? = null,
                 val groupNodes: List<Data<Name?>?>? = null,
             ) {
@@ -166,10 +169,20 @@ data class ApiChapterListResponse(
                         }
                     }
                     chapter_number = serial
-                    date_upload = dateModify ?: dateCreate ?: 0L
+                    date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
                     scanlator = groupNodes?.filter { it?.data?.name != null }
                         ?.joinToString { it!!.data!!.name!! }
                         ?: userNode?.data?.name ?: "\u200B"
+                }
+
+                private fun JsonPrimitive.parseDate(): Long? {
+                    return runCatching {
+                        if (this.isString) {
+                            DATE_FORMATTER.parse(this.content)!!.time
+                        } else {
+                            this.long
+                        }
+                    }.getOrNull()
                 }
             }
         }
@@ -201,6 +214,7 @@ data class ApiSearchPayload(
     val variables: Variables,
     val query: String,
 ) {
+    @SerialName("variables")
     @Serializable
     data class Variables(
         val select: Select,

@@ -145,25 +145,14 @@ data class ApiChapterListResponse(
             class ChapterDto(
                 val id: String? = null,
                 val urlPath: String? = null,
-
-                // comicId may or may not be present
                 val comicId: String? = null,
-
-                // chapter number: some responses use `serial`, others `chaNum`
                 val serial: Float? = null,
                 @SerialName("chaNum") val chaNum: Float? = null,
-
-                // display name: some responses use "dname", others "displayName"
                 @SerialName("dname") val dname: String? = null,
                 @SerialName("displayName") val displayNameAlt: String? = null,
-
                 val title: String? = null,
-
-                // dates can be numeric or string -> use JsonPrimitive and parse
                 val dateCreate: JsonPrimitive? = null,
                 val dateModify: JsonPrimitive? = null,
-
-                // accept both naming variants for user/group nodes
                 @SerialName("userNode") val userNode: Data<Name?>? = null,
                 @SerialName("groupNodes") val groupNodes: List<Data<Name?>?>? = null,
             ) {
@@ -173,13 +162,10 @@ data class ApiChapterListResponse(
                 )
 
                 fun toSChapter(): SChapter = SChapter.create().apply {
-                    // determine url: prefer urlPath, then id
                     url = (urlPath ?: id ?: "").trim()
 
-                    // determine display name
                     val display = (dname ?: displayNameAlt ?: "").trim()
 
-                    // determine chapter number
                     val chapNum = serial ?: chaNum ?: 0f
 
                     name = buildString {
@@ -200,7 +186,6 @@ data class ApiChapterListResponse(
 
                     chapter_number = chapNum
 
-                    // parseDate handles both string timestamps and numeric epoch values
                     date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
 
                     scanlator = groupNodes?.filter { it?.data?.name != null }

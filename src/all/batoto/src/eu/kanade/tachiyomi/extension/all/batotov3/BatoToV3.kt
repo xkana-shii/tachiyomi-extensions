@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import android.app.Application
 import android.content.SharedPreferences
 import android.widget.Toast
 import androidx.preference.ListPreference
@@ -23,30 +22,21 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import rx.Observable
-import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-open class BatoTo(
-    final override val lang: String,
-    private val siteLang: List<String>,
+open class BatoToV3(
+    override val lang: String,
+    private val siteLang: String = lang,
+    private val preferences: SharedPreferences,
+
 ) : ConfigurableSource, HttpSource() {
 
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
-
-    override val name: String = "Bato.to"
+    override val name: String = "Bato.to V3"
 
     override val baseUrl: String = getMirrorPref()!!
-
-    override val id: Long = when (lang) {
-        "zh-Hans" -> 2818874445640189582
-        "zh-Hant" -> 38886079663327225
-        "ro-MD" -> 8871355786189601023
-        else -> super.id
-    }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
@@ -95,14 +85,21 @@ open class BatoTo(
         coerceInputValues = true
     }
 
-    override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(4)
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("Referer", "$baseUrl/")
+                .build()
+
+            chain.proceed(request)
+        }
         .build()
 
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
-    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("field_score")))
+    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("views_d000")))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
@@ -122,11 +119,12 @@ open class BatoTo(
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        var incTLangs = if (siteLang.isEmpty()) emptyList() else listOf(siteLang)
         val payloadObj = ApiSearchPayload(
             pageNumber = page,
             size = 30,
             query = query.trim(),
-            incTLangs = siteLang,
+            incTLangs = incTLangs,
             sort = filters.firstInstanceOrNull<SortFilter>()?.selected,
             incGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.included,
             excGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.excluded,
@@ -154,6 +152,77 @@ open class BatoTo(
             .let { MangasPage(it, hasNextPage) }
     }
 
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+
+        if (request.url.fragment != PAGE_FRAGMENT || response.isSuccessful) {
+            return response
+        }
+
+        response.closeQuietly()
+
+        val urlString = request.url.toString()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            val regex = Regex("""https://([kn])(\d{2})""")
+            val match = regex.find(urlString)
+            if (match != null) {
+                val (currentLetter, number) = match.destructured
+                val fallbackLetter = if (currentLetter == "k") "n" else "k"
+                val swappedUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
+
+                if (swappedUrl != urlString) {
+                    val swappedRequest = request.newBuilder()
+                        .url(swappedUrl)
+                        .build()
+
+                    try {
+                        val swappedResponse = chain
+                            .withConnectTimeout(5, TimeUnit.SECONDS)
+                            .withReadTimeout(10, TimeUnit.SECONDS)
+                            .proceed(swappedRequest)
+
+                        if (swappedResponse.isSuccessful) {
+                            return swappedResponse
+                        }
+
+                        swappedResponse.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            // Sorted list: Most reliable servers FIRST
+            val servers = listOf("n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10", "k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09")
+
+            for (server in servers) {
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    val newResponse = chain
+                        .withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+
+                    newResponse.close()
+                } catch (_: Exception) {
+                    // Connection error on this mirror, ignore and loop to next
+                }
+            }
+        }
+
+        return chain.proceed(request)
+    }
+
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
@@ -168,6 +237,49 @@ open class BatoTo(
         val mangaData = response.parseAs<ApiDetailsResponse>()
 
         return mangaData.data.comicNode.data.toSManga(coverQuality())
+    }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = when {
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
+                        else -> try {
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
+                        } catch (_: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
+                    }
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
+                } catch (_: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
     }
 
     override fun getMangaUrl(manga: SManga): String {
@@ -240,70 +352,87 @@ open class BatoTo(
         val DATE_FORMATTER by lazy {
             SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.ENGLISH)
         }
-        val chapterNumRegex by lazy { Regex("""\.0+$""") }
-        val whitespace by lazy { Regex("\\s+") }
-        const val SEARCH_PREFIX = "ID:"
-        private const val RESTART_TACHIYOMI = "Restart Tachiyomi to apply new setting."
-        private const val COVER_PREF_KEY = "COVER"
-        private const val COVER_PREF_TITLE = "Cover Quality"
-        private val COVER_PREF_ENTRIES = arrayOf("Original", "Medium", "Low")
-        private val COVER_PREF_DEFAULT_VALUE = COVER_PREF_ENTRIES[0]
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
+        private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
+        private val seriesIdRegex = Regex("""series/(\d+)""")
+        private val chapterIdRegex = Regex("""/chapter/(\d+)""") // /chapter/4016325
+        private val idRegex = Regex("""(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
-        private const val MIRROR_PREF_TITLE = "Preferred Mirror"
-        private val MIRROR_PREF_ENTRIES = arrayOf(
-            "bato.to",
-            "wto.to",
-            "mto.to",
-            "dto.to",
-            "hto.to",
-            "batotoo.com",
-            "battwo.com",
-            "batotwo.com",
-            "comiko.net",
-            "mangatoto.com",
-            "mangatoto.net",
-            "mangatoto.org",
-            "comiko.org",
-            "batocomic.com",
-            "batocomic.net",
-            "batocomic.org",
-            "readtoto.com",
-            "readtoto.net",
-            "readtoto.org",
-            "xbato.com",
-            "xbato.net",
-            "xbato.org",
-            "zbato.com",
-            "zbato.net",
-            "zbato.org",
-        )
-        private val MIRROR_PREF_ENTRY_VALUES = arrayOf(
-            "https://bato.to",
-            "https://wto.to",
-            "https://mto.to",
+        private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+        private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"
+
+        // https://batotomirrors.pages.dev/
+        private val mirrors = arrayOf(
+            "https://ato.to",
             "https://dto.to",
+            "https://fto.to",
             "https://hto.to",
+            "https://jto.to",
+            "https://lto.to",
+            "https://mto.to",
+            "https://nto.to",
+            "https://vto.to",
+            "https://wto.to",
+            "https://xto.to",
+            "https://yto.to",
+            "https://vba.to",
+            "https://wba.to",
+            "https://xba.to",
+            "https://yba.to",
+            "https://zba.to",
+            "https://bato.ac",
+            "https://bato.bz",
+            "https://bato.cc",
+            "https://bato.cx",
+            "https://bato.id",
+            "https://bato.pw",
+            "https://bato.sh",
+            "https://bato.to",
+            "https://bato.vc",
+            "https://bato.day",
+            "https://bato.red",
+            "https://bato.run",
+            "https://batoto.in",
+            "https://batoto.tv",
             "https://batotoo.com",
-            "https://battwo.com",
             "https://batotwo.com",
-            "https://comiko.net",
-            "https://mangatoto.com",
-            "https://mangatoto.net",
-            "https://mangatoto.org",
-            "https://comiko.org",
-            "https://batocomic.com",
-            "https://batocomic.net",
-            "https://batocomic.org",
-            "https://readtoto.com",
-            "https://readtoto.net",
-            "https://readtoto.org",
+            "https://batpub.com",
+            "https://batread.com",
+            "https://battwo.com",
             "https://xbato.com",
             "https://xbato.net",
             "https://xbato.org",
             "https://zbato.com",
             "https://zbato.net",
             "https://zbato.org",
+            "https://comiko.net",
+            "https://comiko.org",
+            "https://mangatoto.com",
+            "https://mangatoto.net",
+            "https://mangatoto.org",
+            "https://batocomic.com",
+            "https://batocomic.net",
+            "https://batocomic.org",
+            "https://readtoto.com",
+            "https://readtoto.net",
+            "https://readtoto.org",
+            "https://kuku.to",
+            "https://okok.to",
+            "https://ruru.to",
+            "https://xdxd.to",
         )
-        val MIRROR_PREF_DEFAULT_VALUE = MIRROR_PREF_ENTRY_VALUES[0]
+
+        private val DEPRECATED_MIRRORS = listOf(
+            "https://batocc.com", // parked
+        )
+
+        private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"
+        private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"
+        private const val ALT_CHAPTER_LIST_PREF_SUMMARY = "If checked, uses an alternate chapter list"
+        private const val ALT_CHAPTER_LIST_PREF_DEFAULT_VALUE = false
+
+        private val titleRegex: Regex =
+            Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|\uD81A\uDD0D.+?\uD81A\uDD0D|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›|/Official|/ Official", RegexOption.IGNORE_CASE)
     }
 }
+

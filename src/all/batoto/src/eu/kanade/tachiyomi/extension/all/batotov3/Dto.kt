@@ -164,14 +164,14 @@ data class ApiChapterListResponse(
                 }
 
                 private fun Float.parseChapterNumber(): String {
-                    return this.toString().replace(BatoTo.chapterNumRegex, "")
+                    return this.toString().replace(BatoToV3.chapterNumRegex, "")
                 }
 
                 private fun JsonPrimitive.parseDate(): Long? {
                     // api sometimes return string and sometimes long 🗿
                     return runCatching {
                         if (this.isString) {
-                            BatoTo.DATE_FORMATTER.parse(this.toString())!!.time
+                            BatoToV3.DATE_FORMATTER.parse(this.toString())!!.time
                         } else {
                             return this.long
                         }

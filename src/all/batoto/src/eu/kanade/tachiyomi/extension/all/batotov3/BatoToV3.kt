@@ -193,7 +193,7 @@ class BatoToV3(
 
         return searchResponse.data.search.items
             .map { items ->
-                items.data.toSManga()
+                items.data.toSManga(baseUrl, ::cleanTitleIfNeeded)
                     .apply { initialized = true }
             }
             .let { MangasPage(it, hasNextPage) }
@@ -298,7 +298,7 @@ class BatoToV3(
         val comicData = result.data.comicNode.data
 
         // Create initial SManga from DTO
-        val manga = comicData.toSManga()
+        val manga = comicData.toSManga(baseUrl, ::cleanTitleIfNeeded)
 
         // Collect removed parts and clean the title similar to V4 behavior
         val removedParts = mutableListOf<String>()

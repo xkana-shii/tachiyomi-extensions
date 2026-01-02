@@ -373,8 +373,12 @@ class BatoToV3(
     }
 
     override fun getMangaUrl(manga: SManga): String {
-        val url = manga.url.split("/")
-        return "$baseUrl/title/${url[2]}-${url[3]}"
+        return "$baseUrl/title/${manga.url}"
+    }
+
+    private fun getMangaId(url: String): String {
+        val matchResult = seriesIdRegex.find(url)
+        return matchResult?.groups?.get(1)?.value ?: url
     }
 
     override fun chapterListRequest(manga: SManga): Request {
@@ -439,10 +443,7 @@ class BatoToV3(
 
     companion object {
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
-        private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
-        internal val chapterIdRegex = Regex("""/chapter/(\d+)""") // /chapter/4016325
-        private val idRegex = Regex("""(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
         private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"

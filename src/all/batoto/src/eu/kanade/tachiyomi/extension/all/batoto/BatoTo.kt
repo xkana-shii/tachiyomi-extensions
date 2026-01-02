@@ -4,7 +4,6 @@ import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.batotov2.BatoToV2
-import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3
 import eu.kanade.tachiyomi.extension.all.batotov4.BatoToV4
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -38,7 +37,6 @@ open class BatoTo(
 
     private val _delegate: HttpSource
         get() = when (siteVer()) {
-            "v3" -> BatoToV3(lang, siteLang, preferences)
             "v4" -> BatoToV4(lang, siteLang, preferences)
             else -> BatoToV2(lang, siteLang, preferences)
         }
@@ -103,7 +101,6 @@ open class BatoTo(
         private const val SITE_VER_PREF_TITLE = "Site version"
         private val SITE_VER_PREF_ENTRIES = arrayOf(
             "v2",
-            "v3",
             "v4",
         )
         private val SITE_VER_PREF_DEFAULT_VALUE = SITE_VER_PREF_ENTRIES[0]

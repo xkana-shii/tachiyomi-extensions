@@ -9,6 +9,7 @@ import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.extension.all.batoto.BatoTo.Companion.BATOTO_REMOVE_TITLE_CUSTOM_PREF
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.network.asObservableSuccess
@@ -512,36 +513,9 @@ class BatoToV4(
         val urlString = request.url.toString()
 
         if (SERVER_PATTERN.containsMatchIn(urlString)) {
-            val regex = Regex("""https://([kn])(\d{2})""")
-            val match = regex.find(urlString)
-            if (match != null) {
-                val (currentLetter, number) = match.destructured
-                val fallbackLetter = if (currentLetter == "k") "n" else "k"
-                val swappedUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
-
-                if (swappedUrl != urlString) {
-                    val swappedRequest = request.newBuilder()
-                        .url(swappedUrl)
-                        .build()
-
-                    try {
-                        val swappedResponse = chain
-                            .withConnectTimeout(5, TimeUnit.SECONDS)
-                            .withReadTimeout(10, TimeUnit.SECONDS)
-                            .proceed(swappedRequest)
-
-                        if (swappedResponse.isSuccessful) {
-                            return swappedResponse
-                        }
-
-                        swappedResponse.close()
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-
-            // Sorted list: Most reliable servers FIRST
-            val servers = listOf("n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10", "k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09")
+            val nServers = (0..30).map { "n%02d".format(it) }.shuffled()
+            val kServers = (0..9).map { "k%02d".format(it) }.shuffled()
+            val servers = nServers + kServers
 
             for (server in servers) {
                 val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
@@ -552,8 +526,8 @@ class BatoToV4(
 
                 try {
                     val newResponse = chain
-                        .withConnectTimeout(5, TimeUnit.SECONDS)
-                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .withConnectTimeout(1, TimeUnit.SECONDS)
+                        .withReadTimeout(3, TimeUnit.SECONDS)
                         .proceed(newRequest)
 
                     if (newResponse.isSuccessful) {
@@ -562,7 +536,6 @@ class BatoToV4(
 
                     newResponse.close()
                 } catch (_: Exception) {
-                    // Connection error on this mirror, ignore and loop to next
                 }
             }
         }
@@ -625,7 +598,7 @@ class BatoToV4(
         }.also(screen::addPreference)
 
         EditTextPreference(screen.context).apply {
-            key = REMOVE_TITLE_CUSTOM_PREF
+            key = BATOTO_REMOVE_TITLE_CUSTOM_PREF
             title = "Custom regex to be removed from title"
             summary = customRemoveTitle()
             setDefaultValue("")
@@ -670,7 +643,7 @@ class BatoToV4(
     }
 
     private fun customRemoveTitle(): String =
-        preferences.getString(REMOVE_TITLE_CUSTOM_PREF, "")!!
+        preferences.getString(BATOTO_REMOVE_TITLE_CUSTOM_PREF, "")!!
 }
 private const val MIRROR_PREF_KEY = "MIRROR"
 private val mirrors = arrayOf(
@@ -681,7 +654,6 @@ private val mirrors = arrayOf(
 private val jsonMediaType = "application/json".toMediaType()
 
 private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
-private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"
 
 private const val PAGE_FRAGMENT = "page"
 private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")

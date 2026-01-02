@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.extension.all.batoto
 
-import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.batotov2.BatoToV2
@@ -51,11 +50,6 @@ open class BatoTo(
             entryValues = SITE_VER_PREF_ENTRIES
             setDefaultValue(SITE_VER_PREF_DEFAULT_VALUE)
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(screen.context, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
-                true
-            }
         }
 
         screen.addPreference(siteVerPref)
@@ -97,6 +91,7 @@ open class BatoTo(
     override fun getFilterList() = _delegate.getFilterList()
 
     companion object {
+        const val BATOTO_REMOVE_TITLE_CUSTOM_PREF = "BATOTO_REMOVE_TITLE_CUSTOM"
         private const val SITE_VER_PREF_KEY = "SITE_VER"
         private const val SITE_VER_PREF_TITLE = "Site version"
         private val SITE_VER_PREF_ENTRIES = arrayOf(

@@ -9,6 +9,7 @@ import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
+import eu.kanade.tachiyomi.extension.all.batoto.BatoTo.Companion.BATOTO_REMOVE_TITLE_CUSTOM_PREF
 import eu.kanade.tachiyomi.lib.cryptoaes.CryptoAES
 import eu.kanade.tachiyomi.lib.cryptoaes.Deobfuscator
 import eu.kanade.tachiyomi.network.GET
@@ -84,7 +85,7 @@ open class BatoToV2(
             setDefaultValue(false)
         }
         val removeCustomPref = EditTextPreference(screen.context).apply {
-            key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
+            key = BATOTO_REMOVE_TITLE_CUSTOM_PREF
             title = "Custom regex to be removed from title"
             summary = customRemoveTitle()
             setDefaultValue("")
@@ -133,7 +134,7 @@ open class BatoToV2(
         return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
     }
     private fun customRemoveTitle(): String =
-        preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "")!!
+        preferences.getString(BATOTO_REMOVE_TITLE_CUSTOM_PREF, "")!!
 
     override val supportsLatest = true
     private val json: Json by injectLazy()
@@ -691,40 +692,11 @@ open class BatoToV2(
         response.close()
 
         if (SERVER_PATTERN.containsMatchIn(urlString)) {
-            val regex = Regex("""https://([kn])(\d{2})""")
-            val match = regex.find(urlString)
-            if (match != null) {
-                val (currentLetter, number) = match.destructured
-                // swap just the letter between 'k' and 'n'
-                val fallbackLetter = if (currentLetter == "k") "n" else "k"
-                val newUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
-                if (newUrl != urlString) {
-                    val newRequest = request.newBuilder()
-                        .url(newUrl)
-                        .build()
-                    try {
-                        val newResponse = chain
-                            .withConnectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-                            .withReadTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                            .proceed(newRequest)
-                        if (newResponse.isSuccessful) {
-                            return newResponse
-                        }
-                        newResponse.close()
-                    } catch (_: Exception) {
-                    }
-                }
-            }
-
-            // (keep fallback server loop here unchanged)
-            val servers = listOf(
-                "n01", "n03", "n04", "n00", "n05", "n06", "n07", "n08", "n09", "n10", "n02", "n11",
-                "k05", "k07",
-                "k01", "k03", "k04", "k00", "k06", "k08", "k09", "k10", "k02", "k11",
-            )
+            val nServers = (0..30).map { "n%02d".format(it) }.shuffled()
+            val kServers = (0..9).map { "k%02d".format(it) }.shuffled()
+            val servers = nServers + kServers
 
             for (server in servers) {
-                if (urlString.contains("https://$server")) continue
                 val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
                 if (newUrl == urlString) continue
 
@@ -734,8 +706,8 @@ open class BatoToV2(
 
                 try {
                     val newResponse = chain
-                        .withConnectTimeout(5, TimeUnit.SECONDS)
-                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .withConnectTimeout(1, TimeUnit.SECONDS)
+                        .withReadTimeout(3, TimeUnit.SECONDS)
                         .proceed(newRequest)
 
                     if (newResponse.isSuccessful) {
@@ -1220,7 +1192,6 @@ open class BatoToV2(
         private val idRegex = Regex("""(\d+)""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
-        private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"
 
         // https://batotomirrors.pages.dev/
         private val mirrors = arrayOf(

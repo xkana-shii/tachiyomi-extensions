@@ -27,14 +27,13 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.internal.closeQuietly
 import rx.Observable
-import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class BatoToV3(
     override val lang: String,
-    private val siteLang: String,
+    private val siteLang: String = lang,
     private val preferences: SharedPreferences,
 ) : ConfigurableSource, HttpSource() {
 
@@ -167,11 +166,12 @@ class BatoToV3(
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        val incTLangs: List<String> = if (siteLang.isEmpty()) emptyList() else listOf(siteLang)
         val payloadObj = ApiSearchPayload(
             pageNumber = page,
             size = 30,
             query = query.trim(),
-            incTLangs = siteLang,
+            incTLangs = incTLangs,
             sort = filters.firstInstanceOrNull<SortFilter>()?.selected,
             incGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.included,
             excGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.excluded,

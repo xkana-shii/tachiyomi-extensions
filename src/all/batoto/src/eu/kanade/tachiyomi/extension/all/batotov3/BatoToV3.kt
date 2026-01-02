@@ -288,7 +288,7 @@ class BatoToV3(
     override fun mangaDetailsRequest(manga: SManga): Request {
         val id = manga.url.split("/")[2]
 
-        val payloadObj = ApiQueryPayload(id, DETAILS_QUERY)
+        val payloadObj = ApiQueryPayload(ApiQueryPayload.Variables(id), DETAILS_QUERY)
 
         return apiRequest(payloadObj)
     }
@@ -410,7 +410,7 @@ class BatoToV3(
             .substringAfterLast("/")
             .substringBefore("-")
 
-        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
+        val payloadObj = ApiQueryPayload(ApiQueryPayload.Variables(id), PAGES_QUERY)
 
         return apiRequest(payloadObj)
     }

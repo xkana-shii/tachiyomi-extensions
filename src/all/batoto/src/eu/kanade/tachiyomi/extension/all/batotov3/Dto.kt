@@ -295,20 +295,12 @@ data class ApiSearchPayload(
 }
 
 @Serializable
-data class ApiQueryPayload(
-    val variables: Variables,
+data class ApiQueryPayload<T>(
+    val variables: T,
     val query: String,
 ) {
     @Serializable
     data class Variables(
         val id: String,
-    )
-
-    constructor(
-        id: String,
-        query: String,
-    ) : this(
-        Variables(id),
-        query,
     )
 }

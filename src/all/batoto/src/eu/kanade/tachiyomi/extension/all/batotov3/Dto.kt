@@ -208,6 +208,12 @@ data class ApiChapterListResponse(
 }
 
 @Serializable
+class ApiChapterListVariables(
+    private val comicId: String,
+    private val start: Int, // set to -1 to grab all chapters
+)
+
+@Serializable
 data class ApiPageListResponse(
     val data: ChapterNode,
 ) {

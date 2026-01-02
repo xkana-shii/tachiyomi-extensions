@@ -382,9 +382,12 @@ class BatoToV3(
     }
 
     override fun chapterListRequest(manga: SManga): Request {
-        val id = manga.url.split("/")[2]
+        val apiVariables = ApiChapterListVariables(
+            comicId = getMangaId(manga.url),
+            start = -1,
+        )
 
-        val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
+        val payloadObj = ApiQueryPayload(apiVariables, CHAPTERS_QUERY)
 
         return apiRequest(payloadObj)
     }

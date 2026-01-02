@@ -288,7 +288,7 @@ class BatoToV3(
     override fun mangaDetailsRequest(manga: SManga): Request {
         val id = getMangaId(manga.url)
 
-        val payloadObj = ApiQueryPayload(ApiQueryPayload.Variables(id), DETAILS_QUERY)
+        val payloadObj = ApiQueryPayload<ApiQueryPayload.Variables>(ApiQueryPayload.Variables(id), DETAILS_QUERY)
 
         return apiRequest(payloadObj)
     }
@@ -387,7 +387,7 @@ class BatoToV3(
             start = -1,
         )
 
-        val payloadObj = ApiQueryPayload(apiVariables, CHAPTERS_QUERY)
+        val payloadObj = ApiQueryPayload<ApiChapterListVariables>(apiVariables, CHAPTERS_QUERY)
 
         return apiRequest(payloadObj)
     }
@@ -410,7 +410,7 @@ class BatoToV3(
             .substringAfterLast("/")
             .substringBefore("-")
 
-        val payloadObj = ApiQueryPayload(ApiQueryPayload.Variables(id), PAGES_QUERY)
+        val payloadObj = ApiQueryPayload<ApiQueryPayload.Variables>(ApiQueryPayload.Variables(id), PAGES_QUERY)
 
         return apiRequest(payloadObj)
     }

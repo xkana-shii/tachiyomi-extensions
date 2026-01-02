@@ -63,16 +63,16 @@ data class SeriesDto(
     val id: String,
     val name: String,
     val slug: String,
-    val summary: SummaryDto?,
+    val summary: SummaryDto? = null,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
     val genres: List<String>? = emptyList(),
-    val originalStatus: String?,
-    val uploadStatus: String?,
-    @SerialName("urlCoverOri") val coverOriginal: String?,
-    @SerialName("urlCover600") val coverMedium: String?,
-    @SerialName("urlCover300") val coverLow: String?,
+    val originalStatus: String? = null,
+    val uploadStatus: String? = null,
+    @SerialName("urlCoverOri") val coverOriginal: String? = null,
+    @SerialName("urlCover600") val coverMedium: String? = null,
+    @SerialName("urlCover300") val coverLow: String? = null,
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
@@ -210,12 +210,6 @@ data class ApiChapterListResponse(
 }
 
 @Serializable
-class ApiChapterListVariables(
-    val comicId: String,
-    val start: Int, // set to -1 to grab all chapters
-)
-
-@Serializable
 data class ApiPageListResponse(
     val data: ChapterNode,
 ) {
@@ -233,76 +227,4 @@ data class ApiPageListResponse(
             )
         }
     }
-}
-
-@Serializable
-data class ApiSearchPayload(
-    val variables: Variables,
-    val query: String,
-) {
-    @SerialName("variables")
-    @Serializable
-    data class Variables(
-        val select: Select,
-    )
-
-    @Serializable
-    data class Select(
-        val page: Int,
-        val size: Int,
-        val where: String,
-        val word: String,
-        val sort: String,
-        val incGenres: List<String>,
-        val excGenres: List<String>,
-        val incOLangs: List<String>,
-        val incTLangs: List<String>,
-        val origStatus: String,
-        val batoStatus: String,
-        val chapCount: String,
-    )
-
-    constructor(
-        pageNumber: Int,
-        size: Int,
-        sort: String?,
-        query: String = "",
-        where: String = "browse",
-        incGenres: List<String>? = emptyList(),
-        excGenres: List<String>? = emptyList(),
-        incOLangs: List<String>? = emptyList(),
-        incTLangs: List<String>? = emptyList(),
-        origStatus: String? = "",
-        batoStatus: String? = "",
-        chapCount: String? = "",
-    ) : this(
-        Variables(
-            Select(
-                page = pageNumber,
-                size = size,
-                where = where,
-                word = query,
-                sort = sort ?: "",
-                incGenres = incGenres ?: emptyList(),
-                excGenres = excGenres ?: emptyList(),
-                incOLangs = incOLangs ?: emptyList(),
-                incTLangs = incTLangs ?: emptyList(),
-                origStatus = origStatus ?: "",
-                batoStatus = batoStatus ?: "",
-                chapCount = chapCount ?: "",
-            ),
-        ),
-        SEARCH_QUERY,
-    )
-}
-
-@Serializable
-data class ApiQueryPayload<T>(
-    val variables: T,
-    val query: String,
-) {
-    @Serializable
-    data class Variables(
-        val id: String,
-    )
 }

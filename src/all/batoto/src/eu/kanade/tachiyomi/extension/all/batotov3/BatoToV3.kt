@@ -137,7 +137,7 @@ class BatoToV3(
         .addInterceptor(::imageFallbackInterceptor)
         .addNetworkInterceptor { chain ->
             val request = chain.request().newBuilder()
-                .header("Referer", "$baseUrl/")
+                .header("Referer", "$baseUrl/v3x/")
                 .build()
 
             chain.proceed(request)
@@ -145,7 +145,7 @@ class BatoToV3(
         .build()
 
     override fun headersBuilder() = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
+        .add("Referer", "$baseUrl/v3x/")
 
     override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("field_score")))
 

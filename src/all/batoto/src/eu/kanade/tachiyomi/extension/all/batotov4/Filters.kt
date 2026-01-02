@@ -50,7 +50,7 @@ class SortFilter(
     default = defaultIndex,
 ) {
     companion object {
-        const val POPULAR_INDEX = 0 // field_score
+        const val POPULAR_INDEX = 9 // field_score
         const val LATEST_INDEX = 5 // field_upload
         val POPULAR = FilterList(SortFilter(POPULAR_INDEX))
         val LATEST = FilterList(SortFilter(LATEST_INDEX))

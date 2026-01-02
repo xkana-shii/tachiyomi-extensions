@@ -146,7 +146,7 @@ class BatoToV3(
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/v3x/")
 
-    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("field_score")))
+    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("views_d000")))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
@@ -157,7 +157,7 @@ class BatoToV3(
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         if (query.startsWith("ID:")) {
             val id = query.substringAfter("ID:")
-            val manga = SManga.create().apply { url = "/series/$id/" }
+            val manga = SManga.create().apply { url = id }
             return fetchMangaDetails(manga).map {
                 MangasPage(listOf(it), false)
             }
@@ -286,7 +286,7 @@ class BatoToV3(
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
-        val id = manga.url.split("/")[2]
+        val id = getMangaId(manga.url)
 
         val payloadObj = ApiQueryPayload(ApiQueryPayload.Variables(id), DETAILS_QUERY)
 

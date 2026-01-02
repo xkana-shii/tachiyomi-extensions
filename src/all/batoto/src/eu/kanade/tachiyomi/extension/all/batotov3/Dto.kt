@@ -74,7 +74,7 @@ data class SeriesDto(
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
-        url = "/series/$id/$slug"
+        url = id
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
         description = summary?.text?.trim()

@@ -1,13 +1,10 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
-import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.chapterIdRegex
+import eu.kanade.tachiyomi.extension.all.batotov4.Data
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.long
 import java.util.Locale
 
 @Serializable
@@ -138,56 +135,41 @@ data class ApiChapterListResponse(
             val data: ChapterDto,
         ) {
             @Serializable
-            data class ChapterDto(
+            class ChapterDto(
+                val comicId: String,
                 val id: String,
+                val serial: Float,
+                @SerialName("dname")
+                val displayName: String,
                 val title: String? = null,
-                val chaNum: Float,
-                val urlPath: String,
-                val dateCreate: JsonPrimitive? = null,
-                val dateModify: JsonPrimitive? = null,
-                @SerialName("userNode") val user: ScanlatorNode? = null,
-                @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
+                val dateCreate: Long? = null,
+                val dateModify: Long? = null,
+                val userNode: Data<Name?>? = null,
+                val groupNodes: List<Data<Name?>?>? = null,
             ) {
-                fun toSChapter() = SChapter.create().apply {
-                    url = urlPath
-                    name = "Chapter ${chaNum.parseChapterNumber()}"
-                    if (!title.isNullOrEmpty()) {
-                        name += ": $title"
-                    }
-                    chapter_number = chaNum
-                    if (!groups.isNullOrEmpty()) {
-                        scanlator = groups
-                            .filterNot { it.data.name.isNullOrEmpty() }
-                            .joinToString { it.data.name?.trim().toString() }
-                    } else if (user != null && user.data.name != null) {
-                        scanlator = "Uploaded by ${user.data.name.trim()}"
-                    }
-                    date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
-                }
-
-                private fun Float.parseChapterNumber(): String {
-                    return this.toString().replace(chapterIdRegex, "")
-                }
-
-                private fun JsonPrimitive.parseDate(): Long? {
-                    // api sometimes return string and sometimes long 🗿
-                    return runCatching {
-                        if (this.isString) {
-                            DATE_FORMATTER.parse(this.toString())!!.time
-                        } else {
-                            return this.long
-                        }
-                    }.getOrNull()
-                }
-
                 @Serializable
-                data class ScanlatorNode(
-                    val data: NameDto,
-                ) {
-                    @Serializable
-                    data class NameDto(
-                        val name: String? = null,
-                    )
+                class Name(
+                    val name: String? = null,
+                )
+
+                fun toSChapter(): SChapter = SChapter.create().apply {
+                    url = id
+                    name = buildString {
+                        val number = serial.toString().substringBefore(".0")
+                        if (!displayName.contains(number)) {
+                            append("Chapter ", number, ": ")
+                        }
+                        append(displayName)
+                        if (!title.isNullOrEmpty()) {
+                            if (isNotEmpty()) append(": ")
+                            append(title)
+                        }
+                    }
+                    chapter_number = serial
+                    date_upload = dateModify ?: dateCreate ?: 0L
+                    scanlator = groupNodes?.filter { it?.data?.name != null }
+                        ?.joinToString { it!!.data!!.name!! }
+                        ?: userNode?.data?.name ?: "\u200B"
                 }
             }
         }

@@ -394,7 +394,7 @@ class BatoToV3(
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
-        return "$baseUrl/${chapter.url}"
+        return "$baseUrl/title/chapter/${chapter.url}"
     }
 
     override fun pageListRequest(chapter: SChapter): Request {

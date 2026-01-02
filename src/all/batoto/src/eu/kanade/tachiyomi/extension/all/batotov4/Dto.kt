@@ -72,12 +72,10 @@ class ComicNode(
                 append("\n\n----\n#### **Alternative Titles**\n")
                 append(altNames.joinToString("\n- ", prefix = "- "))
             }
-        }.trim().replace(urlRegex, "<$1>")
+        }.trim()
         initialized = true
     }
 }
-
-private val urlRegex = Regex("""(https?://[^\s<"]+)""")
 
 // ************ Comic Search ************ //
 

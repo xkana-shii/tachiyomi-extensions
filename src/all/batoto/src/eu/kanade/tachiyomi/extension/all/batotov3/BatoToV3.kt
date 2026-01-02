@@ -199,6 +199,19 @@ class BatoToV3(
             .let { MangasPage(it, hasNextPage) }
     }
 
+    private fun cleanTitleIfNeeded(title: String): String {
+        var tempTitle = title
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
+            runCatching {
+                tempTitle = tempTitle.replace(Regex(customRegex), "")
+            }
+        }
+        if (isRemoveTitleVersion()) {
+            tempTitle = tempTitle.replace(titleRegex, "")
+        }
+        return tempTitle.trim()
+    }
+
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val response = chain.proceed(request)
@@ -281,9 +294,39 @@ class BatoToV3(
     }
 
     override fun mangaDetailsParse(response: Response): SManga {
-        val mangaData = response.parseAs<ApiDetailsResponse>()
+        val result = response.parseAs<ApiDetailsResponse>()
+        val comicData = result.data.comicNode.data
 
-        return mangaData.data.comicNode.data.toSManga()
+        // Create initial SManga from DTO
+        val manga = comicData.toSManga()
+
+        // Collect removed parts and clean the title similar to V4 behavior
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = manga.title
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+
+        // Build description including removed parts section
+        val description = buildString {
+            if (!manga.description.isNullOrBlank()) append(manga.description)
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- `$it`\n") }
+            }
+        }.trim().let { autoMarkdownLinks(it) }
+
+        // Apply cleaned title and description back to manga
+        manga.title = cleanedTitle
+        manga.description = description
+
+        return manga
     }
 
     private fun autoMarkdownLinks(input: String): String {

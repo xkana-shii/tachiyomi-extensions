@@ -1,8 +1,5 @@
-@file:Suppress("unused")
-
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -10,7 +7,6 @@ data class ApiSearchPayload(
     val variables: Variables,
     val query: String,
 ) {
-    @SerialName("variables")
     @Serializable
     data class Variables(
         val select: Select,
@@ -67,18 +63,20 @@ data class ApiSearchPayload(
 }
 
 @Serializable
-data class ApiQueryPayload<T>(
-    val variables: T,
+data class ApiQueryPayload(
+    val variables: Variables,
     val query: String,
 ) {
     @Serializable
     data class Variables(
         val id: String,
     )
-}
 
-@Serializable
-class ApiChapterListVariables(
-    val comicId: String,
-    val start: Int, // set to -1 to grab all chapters
-)
+    constructor(
+        id: String,
+        query: String,
+    ) : this(
+        Variables(id),
+        query,
+    )
+}

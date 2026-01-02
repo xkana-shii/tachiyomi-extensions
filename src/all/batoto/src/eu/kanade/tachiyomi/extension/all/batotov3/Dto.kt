@@ -1,8 +1,5 @@
-@file:Suppress("unused")
-
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import kotlinx.serialization.SerialName
@@ -10,11 +7,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.long
 import java.util.Locale
-
-@Serializable
-class Data<T>(
-    val data: T,
-)
 
 @Serializable
 data class ApiSearchResponse(
@@ -63,20 +55,20 @@ data class SeriesDto(
     val id: String,
     val name: String,
     val slug: String,
-    val summary: SummaryDto? = null,
+    val summary: SummaryDto?,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
     val genres: List<String>? = emptyList(),
-    val originalStatus: String? = null,
-    val uploadStatus: String? = null,
-    @SerialName("urlCoverOri") val coverOriginal: String? = null,
-    @SerialName("urlCover600") val coverMedium: String? = null,
-    @SerialName("urlCover300") val coverLow: String? = null,
+    val originalStatus: String?,
+    val uploadStatus: String?,
+    @SerialName("urlCoverOri") val coverOriginal: String?,
+    @SerialName("urlCover600") val coverMedium: String?,
+    @SerialName("urlCover300") val coverLow: String?,
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
-        url = id
+        url = "/series/$id/$slug"
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
         description = summary?.text?.trim()
@@ -121,7 +113,7 @@ data class SeriesDto(
 
     @Serializable
     data class SummaryDto(
-        val text: String? = null,
+        val text: String?,
     )
 }
 
@@ -144,65 +136,56 @@ data class ApiChapterListResponse(
             val data: ChapterDto,
         ) {
             @Serializable
-            class ChapterDto(
-                val id: String? = null,
-                val urlPath: String? = null,
-                val comicId: String? = null,
-                val serial: Float? = null,
-                @SerialName("chaNum") val chaNum: Float? = null,
-                @SerialName("dname") val dname: String? = null,
-                @SerialName("displayName") val displayNameAlt: String? = null,
+            data class ChapterDto(
+                val id: String,
                 val title: String? = null,
+                val chaNum: Float,
+                val urlPath: String,
                 val dateCreate: JsonPrimitive? = null,
                 val dateModify: JsonPrimitive? = null,
-                @SerialName("userNode") val userNode: Data<Name?>? = null,
-                @SerialName("groupNodes") val groupNodes: List<Data<Name?>?>? = null,
+                @SerialName("userNode") val user: ScanlatorNode? = null,
+                @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
-                @Serializable
-                class Name(
-                    val name: String? = null,
-                )
-
-                fun toSChapter(): SChapter = SChapter.create().apply {
-                    url = (urlPath ?: id ?: "").trim()
-
-                    val display = (dname ?: displayNameAlt ?: "").trim()
-
-                    val chapNum = serial ?: chaNum ?: 0f
-
-                    name = buildString {
-                        val number = chapNum.toString().substringBefore(".0")
-                        if (display.isEmpty()) {
-                            append("Chapter ", number)
-                        } else {
-                            if (!display.contains(number)) {
-                                append("Chapter ", number, ": ")
-                            }
-                            append(display)
-                        }
-                        if (!title.isNullOrEmpty()) {
-                            if (isNotEmpty()) append(": ")
-                            append(title)
-                        }
+                fun toSChapter() = SChapter.create().apply {
+                    url = urlPath
+                    name = "Chapter ${chaNum.parseChapterNumber()}"
+                    if (!title.isNullOrEmpty()) {
+                        name += ": $title"
                     }
-
-                    chapter_number = chapNum
-
+                    chapter_number = chaNum
+                    if (!groups.isNullOrEmpty()) {
+                        scanlator = groups
+                            .filterNot { it.data.name.isNullOrEmpty() }
+                            .joinToString { it.data.name?.trim().toString() }
+                    } else if (user != null && user.data.name != null) {
+                        scanlator = "Uploaded by ${user.data.name.trim()}"
+                    }
                     date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
+                }
 
-                    scanlator = groupNodes?.filter { it?.data?.name != null }
-                        ?.joinToString { it!!.data!!.name!! }
-                        ?: userNode?.data?.name ?: "\u200B"
+                private fun Float.parseChapterNumber(): String {
+                    return this.toString().replace(BatoTo.chapterNumRegex, "")
                 }
 
                 private fun JsonPrimitive.parseDate(): Long? {
+                    // api sometimes return string and sometimes long 🗿
                     return runCatching {
                         if (this.isString) {
-                            DATE_FORMATTER.parse(this.content)!!.time
+                            BatoTo.DATE_FORMATTER.parse(this.toString())!!.time
                         } else {
-                            this.long
+                            return this.long
                         }
                     }.getOrNull()
+                }
+
+                @Serializable
+                data class ScanlatorNode(
+                    val data: NameDto,
+                ) {
+                    @Serializable
+                    data class NameDto(
+                        val name: String? = null,
+                    )
                 }
             }
         }
@@ -227,4 +210,83 @@ data class ApiPageListResponse(
             )
         }
     }
+}
+
+@Serializable
+data class ApiSearchPayload(
+    val variables: Variables,
+    val query: String,
+) {
+    @Serializable
+    data class Variables(
+        val select: Select,
+    )
+
+    @Serializable
+    data class Select(
+        val page: Int,
+        val size: Int,
+        val where: String,
+        val word: String,
+        val sort: String,
+        val incGenres: List<String>,
+        val excGenres: List<String>,
+        val incOLangs: List<String>,
+        val incTLangs: List<String>,
+        val origStatus: String,
+        val batoStatus: String,
+        val chapCount: String,
+    )
+
+    constructor(
+        pageNumber: Int,
+        size: Int,
+        sort: String?,
+        query: String = "",
+        where: String = "browse",
+        incGenres: List<String>? = emptyList(),
+        excGenres: List<String>? = emptyList(),
+        incOLangs: List<String>? = emptyList(),
+        incTLangs: List<String>? = emptyList(),
+        origStatus: String? = "",
+        batoStatus: String? = "",
+        chapCount: String? = "",
+    ) : this(
+        Variables(
+            Select(
+                page = pageNumber,
+                size = size,
+                where = where,
+                word = query,
+                sort = sort ?: "",
+                incGenres = incGenres ?: emptyList(),
+                excGenres = excGenres ?: emptyList(),
+                incOLangs = incOLangs ?: emptyList(),
+                incTLangs = incTLangs ?: emptyList(),
+                origStatus = origStatus ?: "",
+                batoStatus = batoStatus ?: "",
+                chapCount = chapCount ?: "",
+            ),
+        ),
+        SEARCH_QUERY,
+    )
+}
+
+@Serializable
+data class ApiQueryPayload(
+    val variables: Variables,
+    val query: String,
+) {
+    @Serializable
+    data class Variables(
+        val id: String,
+    )
+
+    constructor(
+        id: String,
+        query: String,
+    ) : this(
+        Variables(id),
+        query,
+    )
 }

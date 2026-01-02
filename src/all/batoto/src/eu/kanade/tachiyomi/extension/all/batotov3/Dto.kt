@@ -1,3 +1,5 @@
+@file:Suppress("unused")
+
 package eu.kanade.tachiyomi.extension.all.batotov3
 
 import eu.kanade.tachiyomi.extension.all.batotov3.BatoToV3.Companion.DATE_FORMATTER
@@ -209,8 +211,8 @@ data class ApiChapterListResponse(
 
 @Serializable
 class ApiChapterListVariables(
-    private val comicId: String,
-    private val start: Int, // set to -1 to grab all chapters
+    val comicId: String,
+    val start: Int, // set to -1 to grab all chapters
 )
 
 @Serializable

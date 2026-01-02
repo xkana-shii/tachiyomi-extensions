@@ -135,7 +135,6 @@ class BatoToV3(
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor(::imageFallbackInterceptor)
-        .addInterceptor(::logNonSuccessfulResponseInterceptor)
         .addNetworkInterceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("Referer", "$baseUrl/v3x/")
@@ -285,31 +284,12 @@ class BatoToV3(
         return chain.proceed(request)
     }
 
-    /**
-     * Logs non-successful HTTP responses (400+) including a peek of the response body so we can
-     * see server error messages without consuming the original response body.
-     */
-    private fun logNonSuccessfulResponseInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
-        val response = chain.proceed(request)
-
-        if (!response.isSuccessful) {
-            val peekBody = try {
-                // peekBody avoids consuming the original response body
-                response.peekBody(1024L * 1024).string()
-            } catch (e: Exception) {
-                e.message ?: ""
-            }
-            Log.e("BatoToV3", "HTTP ${response.code} ${response.message} for ${request.url}. Body: $peekBody")
-        }
-
-        return response
-    }
-
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
         val id = getMangaId(manga.url)
+
+        Log.d("BatoToV3", "mangaDetailsRequest - manga.url: ${manga.url}, extracted id: $id")
 
         val payloadObj = ApiQueryPayload<ApiQueryPayload.Variables>(ApiQueryPayload.Variables(id), DETAILS_QUERY)
 
@@ -400,8 +380,18 @@ class BatoToV3(
     }
 
     private fun getMangaId(url: String): String {
-        val matchResult = seriesIdRegex.find(url)
-        return matchResult?.groups?.get(1)?.value ?: url
+        val trimmed = url.trim()
+
+        // If it's already just digits, return it
+        if (numericIdRegex.matches(trimmed)) return trimmed
+
+        // Try to match known patterns like "series/123" or "title/123"
+        val matchResult = seriesIdRegex.find(trimmed)
+        if (matchResult != null) return matchResult.groups[1]?.value ?: trimmed
+
+        // Try last path segment (works if manga.url is a full URL or path)
+        val lastSeg = trimmed.removeSuffix("/").substringAfterLast("/").substringBefore("-").substringBefore("?")
+        return if (numericIdRegex.matches(lastSeg)) lastSeg else trimmed
     }
 
     override fun chapterListRequest(manga: SManga): Request {
@@ -410,28 +400,19 @@ class BatoToV3(
             start = -1,
         )
 
+        Log.d("BatoToV3", "chapterListRequest - manga.url: ${manga.url}, comicId: ${apiVariables.comicId}")
+
         val payloadObj = ApiQueryPayload<ApiChapterListVariables>(apiVariables, CHAPTERS_QUERY)
 
         return apiRequest(payloadObj)
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        // Read the response body string explicitly so we can log it on errors.
-        val bodyString = runCatching { response.body?.string().orEmpty() }.getOrElse { it.message ?: "" }
+        val chapterList = response.parseAs<ApiChapterListResponse>()
 
-        if (!response.isSuccessful) {
-            Log.e("BatoToV3", "chapterListParse: HTTP ${response.code} ${response.message}. Body: $bodyString")
-        }
-
-        try {
-            val chapterList = json.decodeFromString<ApiChapterListResponse>(bodyString)
-            return chapterList.data.chapters
-                .map { it.data.toSChapter() }
-                .sortedByDescending { it.chapter_number }
-        } catch (e: Exception) {
-            Log.e("BatoToV3", "chapterListParse: Failed to parse chapters: ${e.message}. Body: $bodyString")
-            throw e
-        }
+        return chapterList.data.chapters
+            .map { it.data.toSChapter() }
+            .sortedByDescending { it.chapter_number }
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
@@ -443,6 +424,8 @@ class BatoToV3(
             .removeSuffix("/")
             .substringAfterLast("/")
             .substringBefore("-")
+
+        Log.d("BatoToV3", "pageListRequest - chapter.url: ${chapter.url}, extracted id: $id")
 
         val payloadObj = ApiQueryPayload<ApiQueryPayload.Variables>(ApiQueryPayload.Variables(id), PAGES_QUERY)
 
@@ -480,7 +463,10 @@ class BatoToV3(
 
     companion object {
         private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
-        private val seriesIdRegex = Regex("""series/(\d+)""")
+
+        // Accept both "series/<id>" and "title/<id>"
+        private val seriesIdRegex = Regex("""(?:series|title)\/(\d+)""")
+        private val numericIdRegex = Regex("""^\d+$""")
         private const val MIRROR_PREF_KEY = "MIRROR"
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
         private const val REMOVE_TITLE_CUSTOM_PREF = "REMOVE_TITLE_CUSTOM"

@@ -8,7 +8,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.long
-import kotlin.text.isNullOrEmpty
+import java.util.Locale
 
 @Serializable
 data class ApiSearchResponse(
@@ -54,56 +54,75 @@ data class ApiDetailsResponse(
 
 @Serializable
 data class SeriesDto(
-    private val id: String,
-    private val name: String,
-    private val altNames: List<String>? = null,
-    private val authors: List<String>? = null,
-    private val artists: List<String>? = null,
-    private val originalStatus: String? = null,
-    private val uploadStatus: String? = null,
-    private val genres: List<String>? = null,
-    private val summary: String? = null,
-    private val extraInfo: String? = null,
-    private val urlCoverOri: String? = null,
+    val id: String,
+    val name: String,
+    val slug: String,
+    val summary: SummaryDto?,
+    val altNames: List<String>? = emptyList(),
+    val authors: List<String>? = emptyList(),
+    val artists: List<String>? = emptyList(),
+    val genres: List<String>? = emptyList(),
+    val originalStatus: String?,
+    val uploadStatus: String?,
+    @SerialName("urlCoverOri") val coverOriginal: String?,
+    @SerialName("urlCover600") val coverMedium: String?,
+    @SerialName("urlCover300") val coverLow: String?,
 ) {
-    fun toSManga(baseUrl: String, cleanTitle: (String) -> String): SManga = SManga.create().apply {
-        url = id
-        title = cleanTitle(name)
-        author = authors?.joinToString()
-        artist = artists?.joinToString()
+    fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
+        title = name.trim()
+        url = "/series/$id/$slug"
+        author = authors?.joinToString { it.trim() }
+        artist = artists?.joinToString { it.trim() }
+        description = summary?.text?.trim()
+        if (!altNames.isNullOrEmpty()) {
+            description += altNames.joinToString(
+                prefix = "\n\nAlternative Names: \n* ",
+                separator = "\n* ",
+            ) { it.trim() }
+        }
         genre = genres?.joinToString { genre ->
-            genreOptions.firstOrNull { it.second == genre }?.first ?: genre
-        }
-        status = run {
-            val statusToCheck = originalStatus ?: uploadStatus
-            when {
-                statusToCheck == null -> SManga.UNKNOWN
-                statusToCheck.contains("pending") -> SManga.UNKNOWN
-                statusToCheck.contains("ongoing") -> SManga.ONGOING
-                statusToCheck.contains("cancelled") -> SManga.CANCELLED
-                statusToCheck.contains("hiatus") -> SManga.ON_HIATUS
-                statusToCheck.contains("completed") -> when {
-                    uploadStatus?.contains("ongoing") == true -> SManga.PUBLISHING_FINISHED
-                    else -> SManga.COMPLETED
+            genre
+                .replace("_", " ")
+                .replaceFirstChar {
+                    if (it.isLowerCase()) {
+                        it.titlecase(Locale.ROOT)
+                    } else {
+                        it.toString()
+                    }
                 }
-                else -> SManga.UNKNOWN
-            }
         }
-        thumbnail_url = urlCoverOri?.let { "$baseUrl$it" }
-        description = buildString {
-            if (!summary.isNullOrEmpty()) {
-                append("\n\n----\n#### **Summary**\n$summary")
-            }
-            if (!extraInfo.isNullOrEmpty()) {
-                append("\n\n----\n#### **Extra Info**\n$extraInfo")
-            }
-            if (!altNames.isNullOrEmpty()) {
-                append("\n\n----\n#### **Alternative Titles**\n")
-                append(altNames.joinToString("\n- ", prefix = "- "))
-            }
-        }.trim()
-        initialized = true
+        thumbnail_url = when (cover) {
+            CoverQuality.Medium -> coverMedium
+            CoverQuality.Low -> coverLow
+            else -> coverOriginal
+        }
+        status = parseStatus(originalStatus, uploadStatus)
     }
+
+    private fun parseStatus(originalStatus: String?, uploadStatus: String?): Int {
+        return when (originalStatus) {
+            null -> SManga.UNKNOWN
+            "ongoing" -> SManga.ONGOING
+            "cancelled" -> SManga.CANCELLED
+            "hiatus" -> SManga.ON_HIATUS
+            "completed" -> when (uploadStatus) {
+                "ongoing" -> SManga.PUBLISHING_FINISHED
+                else -> SManga.COMPLETED
+            }
+            else -> SManga.UNKNOWN
+        }
+    }
+
+    @Serializable
+    data class SummaryDto(
+        val text: String?,
+    )
+}
+
+enum class CoverQuality {
+    Original,
+    Medium,
+    Low,
 }
 
 @Serializable

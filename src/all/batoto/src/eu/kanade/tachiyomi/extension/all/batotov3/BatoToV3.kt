@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.all.batotov3
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
@@ -134,6 +135,7 @@ class BatoToV3(
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor(::imageFallbackInterceptor)
+        .addInterceptor(::logNonSuccessfulResponseInterceptor)
         .addNetworkInterceptor { chain ->
             val request = chain.request().newBuilder()
                 .header("Referer", "$baseUrl/v3x/")
@@ -283,6 +285,27 @@ class BatoToV3(
         return chain.proceed(request)
     }
 
+    /**
+     * Logs non-successful HTTP responses (400+) including a peek of the response body so we can
+     * see server error messages without consuming the original response body.
+     */
+    private fun logNonSuccessfulResponseInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+
+        if (!response.isSuccessful) {
+            val peekBody = try {
+                // peekBody avoids consuming the original response body
+                response.peekBody(1024L * 1024).string()
+            } catch (e: Exception) {
+                e.message ?: ""
+            }
+            Log.e("BatoToV3", "HTTP ${response.code} ${response.message} for ${request.url}. Body: $peekBody")
+        }
+
+        return response
+    }
+
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
@@ -393,11 +416,22 @@ class BatoToV3(
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
-        val chapterList = response.parseAs<ApiChapterListResponse>()
+        // Read the response body string explicitly so we can log it on errors.
+        val bodyString = runCatching { response.body?.string().orEmpty() }.getOrElse { it.message ?: "" }
 
-        return chapterList.data.chapters
-            .map { it.data.toSChapter() }
-            .sortedByDescending { it.chapter_number }
+        if (!response.isSuccessful) {
+            Log.e("BatoToV3", "chapterListParse: HTTP ${response.code} ${response.message}. Body: $bodyString")
+        }
+
+        try {
+            val chapterList = json.decodeFromString<ApiChapterListResponse>(bodyString)
+            return chapterList.data.chapters
+                .map { it.data.toSChapter() }
+                .sortedByDescending { it.chapter_number }
+        } catch (e: Exception) {
+            Log.e("BatoToV3", "chapterListParse: Failed to parse chapters: ${e.message}. Body: $bodyString")
+            throw e
+        }
     }
 
     override fun getChapterUrl(chapter: SChapter): String {

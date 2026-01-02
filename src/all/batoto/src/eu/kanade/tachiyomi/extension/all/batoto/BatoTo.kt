@@ -18,7 +18,7 @@ import kotlin.getValue
 
 open class BatoTo(
     final override val lang: String,
-    siteLang: String = lang,
+    private val siteLang: String = lang,
 ) : ConfigurableSource, HttpSource() {
 
     override val name: String = "Bato.to"
@@ -36,14 +36,14 @@ open class BatoTo(
         return preferences.getString("${SITE_VER_PREF_KEY}_$lang", SITE_VER_PREF_DEFAULT_VALUE) ?: SITE_VER_PREF_DEFAULT_VALUE
     }
 
-    private val _delegate: HttpSource =
-        when (siteVer()) {
+    private val _delegate: HttpSource
+        get() = when (siteVer()) {
             "v3" -> BatoToV3(lang, siteLang, preferences)
             "v4" -> BatoToV4(lang, siteLang, preferences)
             else -> BatoToV2(lang, siteLang, preferences)
         }
 
-    override val client = _delegate.client
+    override val client get() = _delegate.client
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val siteVerPref = ListPreference(screen.context).apply {
@@ -66,7 +66,7 @@ open class BatoTo(
 
     override val baseUrl: String get() = _delegate.baseUrl
 
-    override val supportsLatest = _delegate.supportsLatest
+    override val supportsLatest get() = _delegate.supportsLatest
 
     // ************ Search ************ //
     override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()

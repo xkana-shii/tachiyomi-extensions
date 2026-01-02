@@ -10,7 +10,6 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -21,18 +20,20 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.internal.closeQuietly
 import rx.Observable
 import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class BatoToV3(
-    final override val lang: String,
+    override val lang: String,
     private val siteLang: String,
     private val preferences: SharedPreferences,
 ) : ConfigurableSource, HttpSource() {
@@ -132,8 +133,15 @@ class BatoToV3(
         coerceInputValues = true
     }
 
-    override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(4)
+    override val client = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("Referer", "$baseUrl/")
+                .build()
+
+            chain.proceed(request)
+        }
         .build()
 
     override fun headersBuilder() = super.headersBuilder()
@@ -189,6 +197,77 @@ class BatoToV3(
                     .apply { initialized = true }
             }
             .let { MangasPage(it, hasNextPage) }
+    }
+
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        val response = chain.proceed(request)
+
+        if (request.url.fragment != PAGE_FRAGMENT || response.isSuccessful) {
+            return response
+        }
+
+        response.closeQuietly()
+
+        val urlString = request.url.toString()
+
+        if (SERVER_PATTERN.containsMatchIn(urlString)) {
+            val regex = Regex("""https://([kn])(\d{2})""")
+            val match = regex.find(urlString)
+            if (match != null) {
+                val (currentLetter, number) = match.destructured
+                val fallbackLetter = if (currentLetter == "k") "n" else "k"
+                val swappedUrl = urlString.replaceFirst(regex, "https://$fallbackLetter$number")
+
+                if (swappedUrl != urlString) {
+                    val swappedRequest = request.newBuilder()
+                        .url(swappedUrl)
+                        .build()
+
+                    try {
+                        val swappedResponse = chain
+                            .withConnectTimeout(5, TimeUnit.SECONDS)
+                            .withReadTimeout(10, TimeUnit.SECONDS)
+                            .proceed(swappedRequest)
+
+                        if (swappedResponse.isSuccessful) {
+                            return swappedResponse
+                        }
+
+                        swappedResponse.close()
+                    } catch (_: Exception) {
+                    }
+                }
+            }
+
+            // Sorted list: Most reliable servers FIRST
+            val servers = listOf("n03", "n00", "n01", "n02", "n04", "n05", "n06", "n07", "n08", "n09", "n10", "k03", "k06", "k07", "k00", "k01", "k02", "k04", "k05", "k08", "k09")
+
+            for (server in servers) {
+                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+
+                val newRequest = request.newBuilder()
+                    .url(newUrl)
+                    .build()
+
+                try {
+                    val newResponse = chain
+                        .withConnectTimeout(5, TimeUnit.SECONDS)
+                        .withReadTimeout(10, TimeUnit.SECONDS)
+                        .proceed(newRequest)
+
+                    if (newResponse.isSuccessful) {
+                        return newResponse
+                    }
+
+                    newResponse.close()
+                } catch (_: Exception) {
+                    // Connection error on this mirror, ignore and loop to next
+                }
+            }
+        }
+
+        return chain.proceed(request)
     }
 
     override fun getFilterList() = filters
@@ -347,6 +426,7 @@ class BatoToV3(
             "https://batocc.com", // parked
         )
 
+        private const val PAGE_FRAGMENT = "page"
         private const val ALT_CHAPTER_LIST_PREF_KEY = "ALT_CHAPTER_LIST"
         private const val ALT_CHAPTER_LIST_PREF_TITLE = "Alternative Chapter List"
         private const val ALT_CHAPTER_LIST_PREF_SUMMARY = "If checked, uses an alternate chapter list"

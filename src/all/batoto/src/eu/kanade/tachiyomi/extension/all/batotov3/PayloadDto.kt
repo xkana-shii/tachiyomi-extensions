@@ -70,10 +70,15 @@ data class ApiSearchPayload(
 data class ApiQueryPayload<T>(
     val variables: T,
     val query: String,
-)
+) {
+    @Serializable
+    data class Variables(
+        val id: String,
+    )
+}
 
 @Serializable
 class ApiChapterListVariables(
-    private val comicId: String,
-    private val start: Int, // set to -1 to grab all chapters
+    val comicId: String,
+    val start: Int, // set to -1 to grab all chapters
 )

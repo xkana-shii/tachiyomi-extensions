@@ -121,7 +121,7 @@ data class SeriesDto(
 
     @Serializable
     data class SummaryDto(
-        val text: String?,
+        val text: String? = null,
     )
 }
 

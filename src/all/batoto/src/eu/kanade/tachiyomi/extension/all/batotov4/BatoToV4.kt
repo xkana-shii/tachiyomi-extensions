@@ -514,8 +514,8 @@ class BatoToV4(
 
         val primaryResponse: Response? = try {
             chain
-                .withConnectTimeout(3, TimeUnit.SECONDS)
-                .withReadTimeout(3, TimeUnit.SECONDS)
+                .withConnectTimeout(1, TimeUnit.SECONDS)
+                .withReadTimeout(1, TimeUnit.SECONDS)
                 .proceed(request)
         } catch (_: Exception) {
             null

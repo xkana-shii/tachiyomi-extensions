@@ -502,17 +502,12 @@ class BatoToV4(
 
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (request.url.fragment != PAGE_FRAGMENT) {
-            return chain.proceed(request)
-        }
+        if (request.url.fragment != PAGE_FRAGMENT) return chain.proceed(request)
 
         val urlString = request.url.toString()
-        val matchesKnownServer = SERVER_PATTERN.containsMatchIn(urlString)
-        if (!matchesKnownServer) {
-            return chain.proceed(request)
-        }
+        if (!SERVER_PATTERN.containsMatchIn(urlString)) return chain.proceed(request)
 
-        val primaryResponse: Response? = try {
+        val primaryResponse = try {
             chain
                 .withConnectTimeout(1, TimeUnit.SECONDS)
                 .withReadTimeout(1, TimeUnit.SECONDS)
@@ -521,22 +516,15 @@ class BatoToV4(
             null
         }
 
-        if (primaryResponse != null && primaryResponse.isSuccessful) {
-            return primaryResponse
-        } else {
-            primaryResponse?.closeQuietly()
-        }
+        if (primaryResponse?.isSuccessful == true) return primaryResponse
+        primaryResponse?.closeQuietly()
 
-        val nServers = (0..30).map { "n%02d".format(it) }.shuffled()
-        val kServers = (0..9).map { "k%02d".format(it) }.shuffled()
-        val servers = nServers + kServers
+        val servers = (0..30).map { "n%02d".format(it) }.shuffled() +
+            (0..9).map { "k%02d".format(it) }.shuffled()
 
         for (server in servers) {
             val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-
-            val newRequest = request.newBuilder()
-                .url(newUrl)
-                .build()
+            val newRequest = request.newBuilder().url(newUrl).build()
 
             try {
                 val newResponse = chain
@@ -544,10 +532,7 @@ class BatoToV4(
                     .withReadTimeout(3, TimeUnit.SECONDS)
                     .proceed(newRequest)
 
-                if (newResponse.isSuccessful) {
-                    return newResponse
-                }
-
+                if (newResponse.isSuccessful) return newResponse
                 newResponse.close()
             } catch (_: Exception) {
             }

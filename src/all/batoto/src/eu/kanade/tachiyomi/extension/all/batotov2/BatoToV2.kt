@@ -685,37 +685,47 @@ open class BatoToV2(
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val response = chain.proceed(request)
-
         if (response.isSuccessful) return response
 
         val urlString = request.url.toString()
         response.close()
 
-        if (SERVER_PATTERN.containsMatchIn(urlString)) {
-            val nServers = (0..30).map { "n%02d".format(it) }.shuffled()
-            val kServers = (0..9).map { "k%02d".format(it) }.shuffled()
-            val servers = nServers + kServers
+        if (!SERVER_PATTERN.containsMatchIn(urlString)) {
+            return chain.proceed(request)
+        }
 
-            for (server in servers) {
-                val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-                if (newUrl == urlString) continue
+        // Primary response attempt with short timeout
+        val primaryResponse = try {
+            chain
+                .withConnectTimeout(1, TimeUnit.SECONDS)
+                .withReadTimeout(1, TimeUnit.SECONDS)
+                .proceed(request)
+        } catch (_: Exception) {
+            null
+        }
 
-                val newRequest = request.newBuilder()
-                    .url(newUrl)
-                    .build()
+        if (primaryResponse?.isSuccessful == true) return primaryResponse
+        primaryResponse?.closeQuietly()
 
-                try {
-                    val newResponse = chain
-                        .withConnectTimeout(1, TimeUnit.SECONDS)
-                        .withReadTimeout(3, TimeUnit.SECONDS)
-                        .proceed(newRequest)
+        val servers = (0..30).map { "n%02d".format(it) }.shuffled() +
+            (0..9).map { "k%02d".format(it) }.shuffled()
 
-                    if (newResponse.isSuccessful) {
-                        return newResponse
-                    }
-                    newResponse.close()
-                } catch (_: Exception) {
-                }
+        for (server in servers) {
+            val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+            if (newUrl == urlString) continue
+
+            val newRequest = request.newBuilder().url(newUrl).build()
+
+            try {
+                val newResponse = chain
+                    .withConnectTimeout(1, TimeUnit.SECONDS)
+                    .withReadTimeout(3, TimeUnit.SECONDS)
+                    .proceed(newRequest)
+
+                if (newResponse.isSuccessful) return newResponse
+                newResponse.close()
+            } catch (_: Exception) {
+                // ignored
             }
         }
 

@@ -36,7 +36,8 @@ open class BatoToV3(
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
                 .coerceAtMost(mirrors.size - 1)
-            return mirrors[index]
+            // v3 base path includes /v3x
+            return "${mirrors[index]}/v3x"
         }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {

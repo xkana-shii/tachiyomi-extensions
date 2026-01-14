@@ -68,7 +68,8 @@ data class SeriesDto(
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
-        url = "/series/$id/$slug"
+        // Store only the numeric id (same pattern as v4)
+        url = id
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
         description = summary?.text?.trim()
@@ -140,14 +141,14 @@ data class ApiChapterListResponse(
                 val id: String,
                 val title: String? = null,
                 val chaNum: Float,
-                val urlPath: String,
+                @SerialName("urlPath") val urlPath: String,
                 val dateCreate: JsonPrimitive? = null,
                 val dateModify: JsonPrimitive? = null,
                 @SerialName("userNode") val user: ScanlatorNode? = null,
                 @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
                 fun toSChapter() = SChapter.create().apply {
-                    url = urlPath
+                    url = id
                     name = "Chapter ${chaNum.parseChapterNumber()}"
                     if (!title.isNullOrEmpty()) {
                         name += ": $title"

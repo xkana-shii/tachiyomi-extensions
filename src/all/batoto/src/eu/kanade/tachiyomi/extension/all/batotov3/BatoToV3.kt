@@ -96,12 +96,20 @@ open class BatoToV3(
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         if (query.startsWith(SEARCH_PREFIX)) {
             val id = query.substringAfter(SEARCH_PREFIX)
-            val manga = SManga.create().apply { url = "/series/$id/" }
+            // store only the id like v4
+            val manga = SManga.create().apply { url = id }
             return fetchMangaDetails(manga).map {
                 MangasPage(listOf(it), false)
             }
         }
         return super.fetchSearchManga(page, query, filters)
+    }
+
+    private fun getMangaId(url: String): String {
+        // If url is already an id, return it. If it's an old-style /series/<id>/..., extract the id.
+        val trimmed = url.trim().trim('/')
+        val parts = trimmed.split('/')
+        return if (parts.size >= 2 && parts[0] == "series") parts[1] else url
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
@@ -142,10 +150,9 @@ open class BatoToV3(
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
-        val id = manga.url.split("/")[2]
-
+        // manga.url now stores the id only; support old-style URLs as well
+        val id = getMangaId(manga.url)
         val payloadObj = ApiQueryPayload(id, DETAILS_QUERY)
-
         return apiRequest(payloadObj)
     }
 
@@ -156,15 +163,13 @@ open class BatoToV3(
     }
 
     override fun getMangaUrl(manga: SManga): String {
-        val url = manga.url.split("/")
-        return "$baseUrl/title/${url[2]}-${url[3]}"
+        // manga.url stores the id only; support old-style input
+        return "$baseUrl/title/${getMangaId(manga.url)}"
     }
 
     override fun chapterListRequest(manga: SManga): Request {
-        val id = manga.url.split("/")[2]
-
+        val id = getMangaId(manga.url)
         val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
-
         return apiRequest(payloadObj)
     }
 
@@ -177,17 +182,14 @@ open class BatoToV3(
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
-        return "$baseUrl/${chapter.url}"
+        // chapter.url now stores the chapter id only
+        return "$baseUrl/title/chapter/${chapter.url}"
     }
 
     override fun pageListRequest(chapter: SChapter): Request {
+        // chapter.url stores the chapter id, so use it directly
         val id = chapter.url
-            .removeSuffix("/")
-            .substringAfterLast("/")
-            .substringBefore("-")
-
         val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
-
         return apiRequest(payloadObj)
     }
 
@@ -236,63 +238,31 @@ open class BatoToV3(
         // Mirror preference key shared with v2/v4 (index-based)
         private const val MIRROR_PREF_KEY = "MIRROR"
         private val mirrors = arrayOf(
-            "https://ato.to",
-            "https://dto.to",
-            "https://fto.to",
-            "https://hto.to",
-            "https://jto.to",
-            "https://lto.to",
-            "https://mto.to",
-            "https://nto.to",
-            "https://vto.to",
-            "https://wto.to",
-            "https://xto.to",
-            "https://yto.to",
-            "https://vba.to",
-            "https://wba.to",
-            "https://xba.to",
-            "https://yba.to",
-            "https://zba.to",
-            "https://bato.ac",
-            "https://bato.bz",
-            "https://bato.cc",
-            "https://bato.cx",
-            "https://bato.id",
-            "https://bato.pw",
-            "https://bato.sh",
             "https://bato.to",
-            "https://bato.vc",
-            "https://bato.day",
-            "https://bato.red",
-            "https://bato.run",
-            "https://batoto.in",
-            "https://batoto.tv",
+            "https://wto.to",
+            "https://mto.to",
+            "https://dto.to",
+            "https://hto.to",
             "https://batotoo.com",
-            "https://batotwo.com",
-            "https://batpub.com",
-            "https://batread.com",
             "https://battwo.com",
-            "https://xbato.com",
-            "https://xbato.net",
-            "https://xbato.org",
-            "https://zbato.com",
-            "https://zbato.net",
-            "https://zbato.org",
+            "https://batotwo.com",
             "https://comiko.net",
-            "https://comiko.org",
             "https://mangatoto.com",
             "https://mangatoto.net",
             "https://mangatoto.org",
+            "https://comiko.org",
             "https://batocomic.com",
             "https://batocomic.net",
             "https://batocomic.org",
             "https://readtoto.com",
             "https://readtoto.net",
             "https://readtoto.org",
-            "https://kuku.to",
-            "https://okok.to",
-            "https://ruru.to",
-            "https://xdxd.to",
+            "https://xbato.com",
+            "https://xbato.net",
+            "https://xbato.org",
+            "https://zbato.com",
+            "https://zbato.net",
+            "https://zbato.org",
         )
     }
 }

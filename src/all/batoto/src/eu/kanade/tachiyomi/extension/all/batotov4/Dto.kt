@@ -142,7 +142,7 @@ class ChapterListData(
             serial?.let { chapter_number = it }
             date_upload = dateModify ?: dateCreate ?: 0L
 
-            // Use only the scanlator name(s). If none available, fall back to "unknown" (same as v2).
+            // Use only the scanlator name(s). If none available, fall back to "Unknown" (same as v2).
             val groupNames = groupNodes
                 ?.mapNotNull { it?.data?.name?.trim() }
                 ?.filter { it.isNotEmpty() }

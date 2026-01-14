@@ -68,7 +68,7 @@ data class SeriesDto(
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
-        url = "/series/$id/$slug"
+        url = id
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
         description = summary?.text?.trim()
@@ -140,26 +140,26 @@ data class ApiChapterListResponse(
                 val id: String,
                 val title: String? = null,
                 val chaNum: Float,
-                val urlPath: String,
+                @SerialName("urlPath") val urlPath: String,
                 val dateCreate: JsonPrimitive? = null,
                 val dateModify: JsonPrimitive? = null,
                 @SerialName("userNode") val user: ScanlatorNode? = null,
                 @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
                 fun toSChapter() = SChapter.create().apply {
-                    url = urlPath
+                    url = id
                     name = "Chapter ${chaNum.parseChapterNumber()}"
                     if (!title.isNullOrEmpty()) {
                         name += ": $title"
                     }
                     chapter_number = chaNum
-                    // Use only the scanlator name(s). If none available, fall back to "unknown" (same as v2).
+                    // Use only the scanlator name(s). If none available, fall back to "Unknown" (same as v2).
                     val scanlatorName = groups
                         ?.mapNotNull { it.data.name?.trim() }
                         ?.filter { it.isNotEmpty() }
                         ?.joinToString()
                         ?: user?.data?.name?.trim()
-                    scanlator = scanlatorName?.takeIf { it.isNotBlank() } ?: "unknown"
+                    scanlator = scanlatorName?.takeIf { it.isNotBlank() } ?: "Unknown"
 
                     date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
                 }

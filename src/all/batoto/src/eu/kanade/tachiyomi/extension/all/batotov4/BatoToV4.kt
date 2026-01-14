@@ -339,19 +339,23 @@ class BatoToV4(
         val result = response.parseAs<ApiComicNodeResponse>()
         val comicData = result.data.response.data
 
-        val manga = comicData.toSManga(baseUrl, ::cleanTitleIfNeeded)
+        val manga = comicData.toSManga(baseUrl, { it })
 
         val removedParts = mutableListOf<String>()
-        var cleanedTitle = manga.title
+        var cleanedTitle = manga.title ?: ""
 
         fun removeAndCollect(regex: Regex) {
             regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
             cleanedTitle = cleanedTitle.replace(regex, "")
         }
 
-        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { removeAndCollect(Regex(it, RegexOption.IGNORE_CASE)) }
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let {
+            removeAndCollect(Regex(it, RegexOption.IGNORE_CASE))
+        }
         if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
         cleanedTitle = cleanedTitle.trim()
+
+        manga.title = cleanedTitle
 
         val description = buildString {
             if (!manga.description.isNullOrBlank()) append(manga.description)

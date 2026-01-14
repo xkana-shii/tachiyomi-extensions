@@ -68,8 +68,7 @@ data class SeriesDto(
 ) {
     fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
         title = name.trim()
-        // Store only the numeric id (same pattern as v4)
-        url = id
+        url = "/series/$id/$slug"
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
         description = summary?.text?.trim()
@@ -141,26 +140,27 @@ data class ApiChapterListResponse(
                 val id: String,
                 val title: String? = null,
                 val chaNum: Float,
-                @SerialName("urlPath") val urlPath: String,
+                val urlPath: String,
                 val dateCreate: JsonPrimitive? = null,
                 val dateModify: JsonPrimitive? = null,
                 @SerialName("userNode") val user: ScanlatorNode? = null,
                 @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
                 fun toSChapter() = SChapter.create().apply {
-                    url = id
+                    url = urlPath
                     name = "Chapter ${chaNum.parseChapterNumber()}"
                     if (!title.isNullOrEmpty()) {
                         name += ": $title"
                     }
                     chapter_number = chaNum
-                    if (!groups.isNullOrEmpty()) {
-                        scanlator = groups
-                            .filterNot { it.data.name.isNullOrEmpty() }
-                            .joinToString { it.data.name?.trim().toString() }
-                    } else if (user != null && user.data.name != null) {
-                        scanlator = "Uploaded by ${user.data.name.trim()}"
-                    }
+                    // Use only the scanlator name(s). If none available, fall back to "unknown" (same as v2).
+                    val scanlatorName = groups
+                        ?.mapNotNull { it.data.name?.trim() }
+                        ?.filter { it.isNotEmpty() }
+                        ?.joinToString()
+                        ?: user?.data?.name?.trim()
+                    scanlator = scanlatorName?.takeIf { it.isNotBlank() } ?: "unknown"
+
                     date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
                 }
 

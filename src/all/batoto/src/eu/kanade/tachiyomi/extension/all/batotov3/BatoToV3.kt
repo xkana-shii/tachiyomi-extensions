@@ -1,6 +1,12 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
 import android.content.SharedPreferences
+import android.text.Editable
+import android.text.TextWatcher
+import android.widget.Button
+import android.widget.Toast
+import androidx.preference.CheckBoxPreference
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.POST
@@ -51,7 +57,7 @@ open class BatoToV3(
             setDefaultValue("0")
         }.let { screen.addPreference(it) }
 
-        // Cover quality (per-language, keep original behavior)
+        // Cover quality (per-language)
         ListPreference(screen.context).apply {
             key = "${COVER_PREF_KEY}_$lang"
             title = COVER_PREF_TITLE
@@ -59,6 +65,54 @@ open class BatoToV3(
             entryValues = COVER_PREF_ENTRIES
             setDefaultValue(COVER_PREF_DEFAULT_VALUE)
             summary = "%s"
+        }.let { screen.addPreference(it) }
+
+        // Remove version info checkbox (like v2/v4)
+        CheckBoxPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
+            title = "Remove version information from entry titles"
+            summary = "This removes version tags like '(Official)' from entry titles."
+            setDefaultValue(false)
+        }.let { screen.addPreference(it) }
+
+        // Custom remove regex (shared key from BatoTo)
+        EditTextPreference(screen.context).apply {
+            key = BATOTO_REMOVE_TITLE_CUSTOM_PREF
+            title = "Custom regex to be removed from title"
+            summary = customRemoveTitle()
+            setDefaultValue("")
+
+            val validate = { str: String ->
+                runCatching { Regex(str) }
+                    .map { true to "" }
+                    .getOrElse { false to it.message }
+            }
+
+            setOnBindEditTextListener { editText ->
+                editText.addTextChangedListener(
+                    object : TextWatcher {
+                        override fun beforeTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
+                        override fun onTextChanged(p0: CharSequence?, p1: Int, p2: Int, p3: Int) {}
+                        override fun afterTextChanged(editable: Editable?) {
+                            editable ?: return
+                            val text = editable.toString()
+                            val valid = validate(text)
+                            editText.error = if (!valid.first) valid.second else null
+                            editText.rootView.findViewById<Button>(android.R.id.button1)?.isEnabled = editText.error == null
+                        }
+                    },
+                )
+            }
+
+            setOnPreferenceChangeListener { _, newValue ->
+                val (isValid, message) = validate(newValue as String)
+                if (isValid) {
+                    summary = newValue
+                } else {
+                    Toast.makeText(screen.context, message, Toast.LENGTH_LONG).show()
+                }
+                isValid
+            }
         }.let { screen.addPreference(it) }
     }
 
@@ -69,6 +123,13 @@ open class BatoToV3(
             else -> CoverQuality.Original
         }
     }
+
+    private fun isRemoveTitleVersion(): Boolean {
+        return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
+    }
+
+    private fun customRemoveTitle(): String =
+        preferences.getString(BATOTO_REMOVE_TITLE_CUSTOM_PREF, "")!!
 
     override val supportsLatest = true
 
@@ -160,7 +221,80 @@ open class BatoToV3(
     override fun mangaDetailsParse(response: Response): SManga {
         val mangaData = response.parseAs<ApiDetailsResponse>()
 
-        return mangaData.data.comicNode.data.toSManga(coverQuality())
+        // Build SManga using the raw title (identity) so we can collect removed parts, then set cleaned title.
+        val manga = mangaData.data.comicNode.data.toSManga(coverQuality())
+
+        val removedParts = mutableListOf<String>()
+        var cleanedTitle = manga.title ?: ""
+
+        fun removeAndCollect(regex: Regex) {
+            regex.findAll(cleanedTitle).forEach { removedParts.add(it.value.trim()) }
+            cleanedTitle = cleanedTitle.replace(regex, "")
+        }
+
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { regexStr ->
+            removeAndCollect(Regex(regexStr, RegexOption.IGNORE_CASE))
+        }
+        if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
+        cleanedTitle = cleanedTitle.trim()
+
+        // Set cleaned title (so UI shows the cleaned title)
+        manga.title = cleanedTitle
+
+        val description = buildString {
+            if (!manga.description.isNullOrBlank()) append(manga.description)
+            if (removedParts.isNotEmpty()) {
+                append("\n\n----\n#### **Removed From Title**\n")
+                removedParts.forEach { append("- `$it`\n") }
+            }
+        }.trim().let { autoMarkdownLinks(it) }
+
+        manga.description = description
+
+        return manga
+    }
+
+    private fun autoMarkdownLinks(input: String): String {
+        val urlRegex = Regex("""(?:[a-zA-Z][a-zA-Z0-9+.-]*:[^\s<>()\[\]]+|(?:www\.|m\.)?(?:[a-zA-Z0-9-]+\.)+[A-Za-z]{2,}(?:/[^\s<>()\[\]]*)?)""")
+        return urlRegex.replace(input) { matchResult ->
+            val url = matchResult.value
+            val start = matchResult.range.first
+            val end = matchResult.range.last
+            val isMarkdownLink = start >= 2 && input.substring(start - 2, start) == "]("
+            val isAngleBracket = (start >= 1 && input[start - 1] == '<') && (end + 1 < input.length && input[end + 1] == '>')
+            if (isMarkdownLink || isAngleBracket) {
+                url
+            } else {
+                val label = try {
+                    val host = when {
+                        url.startsWith("https://www.") || url.startsWith("http://www.") ||
+                            url.startsWith("https://m.") || url.startsWith("http://m.") -> {
+                            val afterFirstDot = url.substringAfter("://").substringAfter('.')
+                            afterFirstDot.substringBefore('.')
+                        }
+                        (url.startsWith("https://") || url.startsWith("http://")) &&
+                            !url.startsWith("https://www.") && !url.startsWith("http://www.") &&
+                            !url.startsWith("https://m.") && !url.startsWith("http://m.") -> {
+                            val afterProtocol = url.substringAfter("://")
+                            afterProtocol.substringBefore('.')
+                        }
+                        else -> try {
+                            java.net.URL(
+                                if (url.startsWith("www.") || url.startsWith("m.")) {
+                                    "http://$url"
+                                } else {
+                                    url
+                                },
+                            ).host
+                        } catch (_: Exception) {
+                            url.substringBefore('/').substringBefore('?')
+                        }
+                    }
+                    if (host.isNotEmpty() && host.any { it.isLetter() }) host.replaceFirstChar { it.uppercase() } else null
+                } catch (_: Exception) { null }
+                if (label != null) "[$label]($url)" else "<$url>"
+            }
+        }.trim()
     }
 
     override fun getMangaUrl(manga: SManga): String {
@@ -265,5 +399,15 @@ open class BatoToV3(
             "https://zbato.net",
             "https://zbato.org",
         )
+
+        // Preference key for removing version info (per-language)
+        private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+
+        // Title regex used to strip version info (matches bracketed or parenthesized tags)
+        // Use same pattern as v2/v4 (allow empty brackets/parentheses)
+        private val titleRegex by lazy { Regex("""\s*(?:\([^)]*\)|\[[^\]]*\])""", RegexOption.IGNORE_CASE) }
+
+        // Custom remove regex key (also available on the wrapper)
+        const val BATOTO_REMOVE_TITLE_CUSTOM_PREF = "BATOTO_REMOVE_TITLE_CUSTOM"
     }
 }

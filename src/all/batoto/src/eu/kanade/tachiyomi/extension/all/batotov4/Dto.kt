@@ -141,8 +141,16 @@ class ChapterListData(
             }
             serial?.let { chapter_number = it }
             date_upload = dateModify ?: dateCreate ?: 0L
-            scanlator = groupNodes?.filter { it?.data?.name != null }?.joinToString { it!!.data!!.name!! }
-                ?: userNode?.data?.name ?: "\u200B"
+
+            // Use only the scanlator name(s). If none available, fall back to "unknown" (same as v2).
+            val groupNames = groupNodes
+                ?.mapNotNull { it?.data?.name?.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.joinToString()
+            val uploaderName = userNode?.data?.name?.trim()
+            scanlator = groupNames?.takeIf { it.isNotBlank() }
+                ?: uploaderName?.takeIf { it.isNotBlank() }
+                    ?: "Unknown"
         }
     }
 }

@@ -10,7 +10,6 @@ private fun buildQuery(queryAction: () -> String): String {
 
 val whitespace by lazy { Regex("\\s+") }
 
-
 val SEARCH_QUERY: String = buildQuery {
     """
         query (%select: SearchComic_Select) {

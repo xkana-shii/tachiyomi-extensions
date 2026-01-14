@@ -1,8 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.batotov3
 
-import android.app.Application
 import android.content.SharedPreferences
-import android.widget.Toast
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.POST
@@ -23,49 +21,36 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import rx.Observable
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-open class BatoTo(
+open class BatoToV3(
     final override val lang: String,
-    private val siteLang: List<String>,
+    private val siteLang: String = lang,
+    private val preferences: SharedPreferences,
 ) : ConfigurableSource, HttpSource() {
-
-    private val preferences: SharedPreferences by lazy {
-        Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
-    }
 
     override val name: String = "Bato.to V3"
 
-    override val baseUrl: String = getMirrorPref()!!
-
-    override val id: Long = when (lang) {
-        "zh-Hans" -> 2818874445640189582
-        "zh-Hant" -> 38886079663327225
-        "ro-MD" -> 8871355786189601023
-        else -> super.id
-    }
+    override val baseUrl: String
+        get() {
+            val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
+                .coerceAtMost(mirrors.size - 1)
+            return mirrors[index]
+        }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        // Mirror selection like v2: index-based mirror preference (shared, not per-language)
         ListPreference(screen.context).apply {
-            key = "${MIRROR_PREF_KEY}_$lang"
-            title = MIRROR_PREF_TITLE
-            entries = MIRROR_PREF_ENTRIES
-            entryValues = MIRROR_PREF_ENTRY_VALUES
-            setDefaultValue(MIRROR_PREF_DEFAULT_VALUE)
+            key = MIRROR_PREF_KEY
+            title = "Preferred Mirror"
+            entries = mirrors
+            entryValues = Array(mirrors.size) { it.toString() }
             summary = "%s"
-
-            setOnPreferenceChangeListener { _, newValue ->
-                val selected = newValue as String
-                val index = findIndexOfValue(selected)
-                val entry = entryValues[index] as String
-                Toast.makeText(screen.context, RESTART_TACHIYOMI, Toast.LENGTH_LONG).show()
-                preferences.edit().putString("${MIRROR_PREF_KEY}_$lang", entry).commit()
-            }
+            setDefaultValue("0")
         }.let { screen.addPreference(it) }
 
+        // Cover quality (per-language, keep original behavior)
         ListPreference(screen.context).apply {
             key = "${COVER_PREF_KEY}_$lang"
             title = COVER_PREF_TITLE
@@ -75,8 +60,6 @@ open class BatoTo(
             summary = "%s"
         }.let { screen.addPreference(it) }
     }
-
-    private fun getMirrorPref(): String? = preferences.getString("${MIRROR_PREF_KEY}_$lang", MIRROR_PREF_DEFAULT_VALUE)
 
     private fun coverQuality(): CoverQuality {
         return when (preferences.getString("${COVER_PREF_KEY}_$lang", COVER_PREF_DEFAULT_VALUE)) {
@@ -122,11 +105,13 @@ open class BatoTo(
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        val incTLangsList = if (siteLang.isEmpty()) emptyList() else listOf(siteLang)
+
         val payloadObj = ApiSearchPayload(
             pageNumber = page,
             size = 30,
             query = query.trim(),
-            incTLangs = siteLang,
+            incTLangs = incTLangsList,
             sort = filters.firstInstanceOrNull<SortFilter>()?.selected,
             incGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.included,
             excGenres = filters.firstInstanceOrNull<GenreGroupFilter>()?.excluded,
@@ -247,62 +232,67 @@ open class BatoTo(
         private const val COVER_PREF_TITLE = "Cover Quality"
         private val COVER_PREF_ENTRIES = arrayOf("Original", "Medium", "Low")
         private val COVER_PREF_DEFAULT_VALUE = COVER_PREF_ENTRIES[0]
+
+        // Mirror preference key shared with v2/v4 (index-based)
         private const val MIRROR_PREF_KEY = "MIRROR"
-        private const val MIRROR_PREF_TITLE = "Preferred Mirror"
-        private val MIRROR_PREF_ENTRIES = arrayOf(
-            "bato.to",
-            "wto.to",
-            "mto.to",
-            "dto.to",
-            "hto.to",
-            "batotoo.com",
-            "battwo.com",
-            "batotwo.com",
-            "comiko.net",
-            "mangatoto.com",
-            "mangatoto.net",
-            "mangatoto.org",
-            "comiko.org",
-            "batocomic.com",
-            "batocomic.net",
-            "batocomic.org",
-            "readtoto.com",
-            "readtoto.net",
-            "readtoto.org",
-            "xbato.com",
-            "xbato.net",
-            "xbato.org",
-            "zbato.com",
-            "zbato.net",
-            "zbato.org",
-        )
-        private val MIRROR_PREF_ENTRY_VALUES = arrayOf(
-            "https://bato.to",
-            "https://wto.to",
-            "https://mto.to",
+        private val mirrors = arrayOf(
+            "https://ato.to",
             "https://dto.to",
+            "https://fto.to",
             "https://hto.to",
+            "https://jto.to",
+            "https://lto.to",
+            "https://mto.to",
+            "https://nto.to",
+            "https://vto.to",
+            "https://wto.to",
+            "https://xto.to",
+            "https://yto.to",
+            "https://vba.to",
+            "https://wba.to",
+            "https://xba.to",
+            "https://yba.to",
+            "https://zba.to",
+            "https://bato.ac",
+            "https://bato.bz",
+            "https://bato.cc",
+            "https://bato.cx",
+            "https://bato.id",
+            "https://bato.pw",
+            "https://bato.sh",
+            "https://bato.to",
+            "https://bato.vc",
+            "https://bato.day",
+            "https://bato.red",
+            "https://bato.run",
+            "https://batoto.in",
+            "https://batoto.tv",
             "https://batotoo.com",
-            "https://battwo.com",
             "https://batotwo.com",
-            "https://comiko.net",
-            "https://mangatoto.com",
-            "https://mangatoto.net",
-            "https://mangatoto.org",
-            "https://comiko.org",
-            "https://batocomic.com",
-            "https://batocomic.net",
-            "https://batocomic.org",
-            "https://readtoto.com",
-            "https://readtoto.net",
-            "https://readtoto.org",
+            "https://batpub.com",
+            "https://batread.com",
+            "https://battwo.com",
             "https://xbato.com",
             "https://xbato.net",
             "https://xbato.org",
             "https://zbato.com",
             "https://zbato.net",
             "https://zbato.org",
+            "https://comiko.net",
+            "https://comiko.org",
+            "https://mangatoto.com",
+            "https://mangatoto.net",
+            "https://mangatoto.org",
+            "https://batocomic.com",
+            "https://batocomic.net",
+            "https://batocomic.org",
+            "https://readtoto.com",
+            "https://readtoto.net",
+            "https://readtoto.org",
+            "https://kuku.to",
+            "https://okok.to",
+            "https://ruru.to",
+            "https://xdxd.to",
         )
-        val MIRROR_PREF_DEFAULT_VALUE = MIRROR_PREF_ENTRY_VALUES[0]
     }
 }

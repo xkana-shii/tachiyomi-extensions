@@ -42,9 +42,11 @@ open class BatoToV3(
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
                 .coerceAtMost(mirrors.size - 1)
-            // v3 base path includes /v3x
-            return "${mirrors[index]}/v3x"
+            return mirrors[index]
         }
+
+    private val mainPageBaseUrl: String
+        get() = "$baseUrl/v3x"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         // Mirror selection like v2: index-based mirror preference (shared, not per-language)
@@ -147,7 +149,7 @@ open class BatoToV3(
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
-    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("field_score")))
+    override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("views_d000")))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 

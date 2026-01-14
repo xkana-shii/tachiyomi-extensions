@@ -150,7 +150,7 @@ class ChapterListData(
             val uploaderName = userNode?.data?.name?.trim()
             scanlator = groupNames?.takeIf { it.isNotBlank() }
                 ?: uploaderName?.takeIf { it.isNotBlank() }
-                    ?: "Unknown"
+                ?: "Unknown"
         }
     }
 }

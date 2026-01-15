@@ -22,16 +22,19 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.internal.closeQuietly
+import okio.IOException
 import rx.Observable
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 open class BatoToV3(
     final override val lang: String,
@@ -132,10 +135,16 @@ open class BatoToV3(
         coerceInputValues = true
     }
 
-    // Add ImageFallbackInterceptor (ported from v4) to the client so image requests can fallback to alternate mirrors.
-    override val client: OkHttpClient = super.client.newBuilder()
-        .rateLimit(4)
-        .addInterceptor(ImageFallbackInterceptor())
+    // Use the same image fallback interceptor implementation as v4.
+    override val client: OkHttpClient = network.cloudflareClient.newBuilder()
+        .addInterceptor(::imageFallbackInterceptor)
+        .addNetworkInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("Referer", "$mirrorRoot/")
+                .build()
+
+            chain.proceed(request)
+        }
         .build()
 
     // Use mirrorRoot as referer for API calls and images (avoid /v3x leaking into endpoints)
@@ -353,8 +362,21 @@ open class BatoToV3(
     override fun pageListParse(response: Response): List<Page> {
         val pages = response.parseAs<ApiPageListResponse>()
 
+        // Build Page.imageUrl with PAGE_FRAGMENT so v4-style imageFallbackInterceptor sees page image requests.
         return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
-            Page(index, "", image)
+            val imageWithFragment = try {
+                image.toHttpUrl().newBuilder()
+                    .fragment(PAGE_FRAGMENT)
+                    .build()
+                    .toString()
+            } catch (e: Exception) {
+                Log.d(TAG, "pageListParse: failed to parse image url '$image' -> ${e.message}")
+                image
+            }
+
+            Log.d(TAG, "pageListParse: index=$index raw='$image' withFragment='$imageWithFragment'")
+
+            Page(index, "", imageWithFragment)
         } ?: emptyList()
     }
 
@@ -381,69 +403,68 @@ open class BatoToV3(
     }
 
     /**
-     * ImageFallbackInterceptor
-     *
-     * Tries alternate mirrors when an image request fails (4xx/5xx). Ported to v3 to match v4 behavior.
-     * Only attempts fallback for likely image requests (common image extensions).
+     * Copy of v4 imageFallbackInterceptor implementation with extra logging.
+     * Attempts fast timeouts and multiple server prefixes on page image requests.
      */
-    private inner class ImageFallbackInterceptor : Interceptor {
-        private val imageExts = listOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
+    private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        Log.d(TAG, "imageFallbackInterceptor: entry url='${request.url}' fragment='${request.url.fragment}'")
 
-        override fun intercept(chain: Interceptor.Chain): Response {
-            val request = chain.request()
-            val url = request.url
-            val path = url.encodedPath.lowercase(Locale.ROOT)
-
-            // Only attempt fallback for requests that look like image requests.
-            val looksLikeImage = imageExts.any { path.endsWith(it) }
-            if (!looksLikeImage) {
-                return chain.proceed(request)
-            }
-
-            var response = chain.proceed(request)
-            if (response.isSuccessful) return response
-
-            // If failed, try alternate mirrors (skip original host)
-            response.close()
-            val originalHost = url.host
-            val pathAndQuery = buildString {
-                append(url.encodedPath)
-                if (!url.encodedQuery.isNullOrEmpty()) append("?").append(url.encodedQuery)
-            }
-
-            var lastResp: Response? = null
-            for (mirror in mirrors) {
-                // Build candidate only if host differs from original
-                val mirrorHost = try {
-                    mirror.toHttpUrlOrNull()?.host
-                } catch (_: Throwable) {
-                    null
-                } ?: continue
-                if (mirrorHost.equals(originalHost, ignoreCase = true)) continue
-
-                val candidate = (mirror.trimEnd('/') + pathAndQuery).toHttpUrlOrNull() ?: continue
-                val newReq = request.newBuilder()
-                    .url(candidate)
-                    .build()
-
-                try {
-                    val candidateResp = chain.proceed(newReq)
-                    if (candidateResp.isSuccessful) {
-                        Log.d(TAG, "ImageFallbackInterceptor: succeeded with mirror $mirror for $pathAndQuery")
-                        return candidateResp
-                    } else {
-                        // keep the last response to return if all fail
-                        lastResp = candidateResp
-                        candidateResp.close()
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "ImageFallbackInterceptor: candidate $mirror failed: ${e.message}")
-                }
-            }
-
-            // If none succeeded, return the last response we got or the original one
-            return lastResp ?: chain.proceed(request)
+        if (request.url.fragment != PAGE_FRAGMENT) {
+            Log.d(TAG, "imageFallbackInterceptor: fragment != PAGE_FRAGMENT -> skipping")
+            return chain.proceed(request)
         }
+
+        val urlString = request.url.toString()
+        if (!SERVER_PATTERN.containsMatchIn(urlString)) {
+            Log.d(TAG, "imageFallbackInterceptor: SERVER_PATTERN not matched for url='$urlString' -> skipping")
+            return chain.proceed(request)
+        }
+
+        val primaryResponse = try {
+            chain
+                .withConnectTimeout(1, TimeUnit.SECONDS)
+                .withReadTimeout(1, TimeUnit.SECONDS)
+                .proceed(request)
+        } catch (ex: Exception) {
+            Log.d(TAG, "imageFallbackInterceptor: primary request threw: ${ex.message}")
+            null
+        }
+
+        if (primaryResponse?.isSuccessful == true) {
+            Log.d(TAG, "imageFallbackInterceptor: primary response successful")
+            return primaryResponse
+        }
+        primaryResponse?.closeQuietly()
+        Log.d(TAG, "imageFallbackInterceptor: primary failed, trying alternatives for '$urlString'")
+
+        val servers = (0..30).map { "n%02d".format(it) }.shuffled() +
+            (0..9).map { "k%02d".format(it) }.shuffled()
+
+        for (server in servers) {
+            val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
+            Log.d(TAG, "imageFallbackInterceptor: trying server=$server -> $newUrl")
+            val newRequest = request.newBuilder().url(newUrl).build()
+
+            try {
+                val newResponse = chain
+                    .withConnectTimeout(1, TimeUnit.SECONDS)
+                    .withReadTimeout(3, TimeUnit.SECONDS)
+                    .proceed(newRequest)
+
+                if (newResponse.isSuccessful) {
+                    Log.d(TAG, "imageFallbackInterceptor: success with server=$server")
+                    return newResponse
+                }
+                Log.d(TAG, "imageFallbackInterceptor: server=$server returned ${newResponse.code}")
+                newResponse.close()
+            } catch (e: Exception) {
+                Log.d(TAG, "imageFallbackInterceptor: server=$server threw: ${e.message}")
+            }
+        }
+
+        Log.d(TAG, "imageFallbackInterceptor: no alternative server succeeded, proceeding with original request")
+        return chain.proceed(request)
     }
 
     companion object {
@@ -496,5 +517,8 @@ open class BatoToV3(
 
         // Custom remove regex key (also available on the wrapper)
         const val BATOTO_REMOVE_TITLE_CUSTOM_PREF = "BATOTO_REMOVE_TITLE_CUSTOM"
+
+        private const val PAGE_FRAGMENT = "page"
+        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
     }
 }

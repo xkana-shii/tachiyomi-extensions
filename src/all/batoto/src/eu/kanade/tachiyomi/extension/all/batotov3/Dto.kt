@@ -63,10 +63,9 @@ data class SeriesDto(
     val genres: List<String>? = emptyList(),
     val originalStatus: String?,
     val uploadStatus: String?,
-    @SerialName("urlCoverOri") val coverOriginal: String?,
-    @SerialName("urlCover600") val coverMedium: String?,
-    @SerialName("urlCover300") val coverLow: String?,
+    private val urlCoverOri: String? = null,
 ) {
+    // Match v4: accept baseUrl and a cleanTitle function, return SManga with same description format and thumbnail handling
     fun toSManga(baseUrl: String, cleanTitle: (String) -> String): SManga = SManga.create().apply {
         url = id
         title = cleanTitle(name.trim())
@@ -97,7 +96,9 @@ data class SeriesDto(
                     }
                 }
         }
-        thumbnail_url = coverOriginal?.let { "$baseUrl$it" }
+
+        // Use only the original cover URL (prefix with provided baseUrl), as requested
+        thumbnail_url = urlCoverOri?.let { "$baseUrl$it" }
         status = parseStatus(originalStatus, uploadStatus)
         initialized = true
     }
@@ -146,19 +147,22 @@ data class ApiChapterListResponse(
                 @SerialName("groupNodes") val groups: List<ScanlatorNode>? = emptyList(),
             ) {
                 fun toSChapter() = SChapter.create().apply {
+                    // store id only (v4 pattern)
                     url = id
                     name = "Chapter ${chaNum.parseChapterNumber()}"
                     if (!title.isNullOrEmpty()) {
                         name += ": $title"
                     }
                     chapter_number = chaNum
-                    // Use only the scanlator name(s). If none available, fall back to "Unknown".
-                    val scanlatorName = groups
+                    // Prefer group names; if none, use uploader's name; if blank, "Unknown"
+                    val groupNames = groups
                         ?.mapNotNull { it.data.name?.trim() }
                         ?.filter { it.isNotEmpty() }
                         ?.joinToString()
-                        ?: user?.data?.name?.trim()
-                    scanlator = scanlatorName?.takeIf { it.isNotBlank() } ?: "Unknown"
+                    val uploaderName = user?.data?.name?.trim()
+                    scanlator = groupNames?.takeIf { it.isNotBlank() }
+                        ?: uploaderName?.takeIf { it.isNotBlank() }
+                        ?: "Unknown"
 
                     date_upload = dateModify?.parseDate() ?: dateCreate?.parseDate() ?: 0L
                 }

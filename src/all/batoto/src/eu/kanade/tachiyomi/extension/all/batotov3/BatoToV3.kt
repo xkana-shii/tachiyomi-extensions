@@ -38,7 +38,7 @@ open class BatoToV3(
 
     override val name: String = "Bato.to V3"
 
-    // baseUrl exposed to the app (WebView, intents, etc.) — include /v3x so the "main" site opens at mirror/v3x
+    // exposed to app (webview/intents) — main site path includes /v3x
     override val baseUrl: String
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
@@ -46,7 +46,7 @@ open class BatoToV3(
             return "${mirrors[index]}/v3x"
         }
 
-    // root mirror without /v3x — use this for API calls and constructing manga/chapter links
+    // mirror root used for API/thumbnail construction (no /v3x)
     private val mirrorRoot: String
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
@@ -55,7 +55,7 @@ open class BatoToV3(
         }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        // Mirror selection like v2: index-based mirror preference (shared, not per-language)
+        // Mirror selection (shared)
         ListPreference(screen.context).apply {
             key = MIRROR_PREF_KEY
             title = "Preferred Mirror"
@@ -65,7 +65,7 @@ open class BatoToV3(
             setDefaultValue("0")
         }.let { screen.addPreference(it) }
 
-        // Remove version info checkbox (like v2/v4)
+        // Remove version info checkbox (per-language)
         CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
             title = "Remove version information from entry titles"
@@ -73,7 +73,7 @@ open class BatoToV3(
             setDefaultValue(false)
         }.let { screen.addPreference(it) }
 
-        // Custom remove regex (shared key from BatoTo)
+        // Custom remove regex (shared key)
         EditTextPreference(screen.context).apply {
             key = BATOTO_REMOVE_TITLE_CUSTOM_PREF
             title = "Custom regex to be removed from title"
@@ -114,9 +114,8 @@ open class BatoToV3(
         }.let { screen.addPreference(it) }
     }
 
-    private fun isRemoveTitleVersion(): Boolean {
-        return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
-    }
+    private fun isRemoveTitleVersion(): Boolean =
+        preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
 
     private fun customRemoveTitle(): String =
         preferences.getString(BATOTO_REMOVE_TITLE_CUSTOM_PREF, "")!!
@@ -134,7 +133,7 @@ open class BatoToV3(
         .rateLimit(4)
         .build()
 
-    // Use mirrorRoot as referer for API calls and image requests to avoid /v3x being applied to all endpoints.
+    // Use mirrorRoot as referer for API calls and images (avoid /v3x leaking into endpoints)
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$mirrorRoot/")
 
@@ -193,7 +192,8 @@ open class BatoToV3(
 
         val mangas = searchResponse.data.search.items
             .map { items ->
-                // toSManga expects (baseUrl, cleanTitle) in the current v3 implementation
+                // ensure thumbnail is returned by using mirrorRoot as base like v4,
+                // and apply title cleaning for display
                 items.data.toSManga(mirrorRoot, ::cleanTitleIfNeeded)
                     .apply { initialized = true }
             }
@@ -243,48 +243,6 @@ open class BatoToV3(
         manga.description = description
 
         return manga
-    }
-
-    override fun getMangaUrl(manga: SManga): String {
-        // use mirrorRoot so manga links don't include /v3x
-        return "$mirrorRoot/title/${getMangaId(manga.url)}"
-    }
-
-    override fun chapterListRequest(manga: SManga): Request {
-        val id = getMangaId(manga.url)
-        val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
-        return apiRequest(payloadObj)
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val chapterList = response.parseAs<ApiChapterListResponse>()
-
-        return chapterList.data.chapters
-            .map { it.data.toSChapter() }
-            .sortedByDescending { it.chapter_number }
-    }
-
-    override fun getChapterUrl(chapter: SChapter): String {
-        // chapter.url stores the chapter id only; use mirrorRoot so link doesn't include /v3x
-        return "$mirrorRoot/title/chapter/${chapter.url}"
-    }
-
-    override fun pageListRequest(chapter: SChapter): Request {
-        val id = chapter.url
-        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
-        return apiRequest(payloadObj)
-    }
-
-    override fun pageListParse(response: Response): List<Page> {
-        val pages = response.parseAs<ApiPageListResponse>()
-
-        return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
-            Page(index, "", image)
-        } ?: emptyList()
-    }
-
-    override fun imageUrlParse(response: Response): String {
-        throw UnsupportedOperationException("Not Used")
     }
 
     private fun cleanTitleIfNeeded(title: String): String {
@@ -343,6 +301,48 @@ open class BatoToV3(
         }.trim()
     }
 
+    override fun getMangaUrl(manga: SManga): String {
+        // return mirror root URL for manga (no /v3x) so webview opens correct path
+        return "$mirrorRoot/title/${getMangaId(manga.url)}"
+    }
+
+    override fun chapterListRequest(manga: SManga): Request {
+        val id = getMangaId(manga.url)
+        val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
+        return apiRequest(payloadObj)
+    }
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val chapterList = response.parseAs<ApiChapterListResponse>()
+
+        return chapterList.data.chapters
+            .map { it.data.toSChapter() }
+            .sortedByDescending { it.chapter_number }
+    }
+
+    override fun getChapterUrl(chapter: SChapter): String {
+        // return mirror root URL for chapter (no /v3x) so webview opens correct path
+        return "$mirrorRoot/title/chapter/${chapter.url}"
+    }
+
+    override fun pageListRequest(chapter: SChapter): Request {
+        val id = chapter.url
+        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
+        return apiRequest(payloadObj)
+    }
+
+    override fun pageListParse(response: Response): List<Page> {
+        val pages = response.parseAs<ApiPageListResponse>()
+
+        return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
+            Page(index, "", image)
+        } ?: emptyList()
+    }
+
+    override fun imageUrlParse(response: Response): String {
+        throw UnsupportedOperationException("Not Used")
+    }
+
     private inline fun <reified R> List<*>.firstInstanceOrNull(): R? =
         filterIsInstance<R>().firstOrNull()
 
@@ -357,7 +357,7 @@ open class BatoToV3(
             .add("Content-Type", payload.contentType().toString())
             .build()
 
-        // POST to mirrorRoot/apo so API calls do not include /v3x
+        // POST to mirror root /apo so API calls use mirrorRoot (no /v3x) while UI/opening uses baseUrl (/v3x)
         return POST("$mirrorRoot/apo", apiHeaders, payload)
     }
 
@@ -369,9 +369,6 @@ open class BatoToV3(
         val chapterNumRegex by lazy { Regex("""\.0+$""") }
         const val SEARCH_PREFIX = "ID:"
         private const val RESTART_TACHIYOMI = "Restart Tachiyomi to apply new setting."
-        private const val COVER_PREF_TITLE = "Cover Quality"
-        private val COVER_PREF_ENTRIES = arrayOf("Original", "Medium", "Low")
-        private val COVER_PREF_DEFAULT_VALUE = COVER_PREF_ENTRIES[0]
 
         // Mirror preference key shared with v2/v4 (index-based)
         private const val MIRROR_PREF_KEY = "MIRROR"

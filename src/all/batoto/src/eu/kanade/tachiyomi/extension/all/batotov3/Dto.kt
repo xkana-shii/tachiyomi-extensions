@@ -56,7 +56,7 @@ data class SeriesDto(
     val name: String,
     val slug: String,
     val summary: SummaryDto?,
-    val extInfo: String? = null,
+    val extInfo: ExtInfoDto?,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
@@ -65,8 +65,9 @@ data class SeriesDto(
     val uploadStatus: String?,
     private val urlCoverOri: String? = null,
 ) {
-    // Match v4: accept baseUrl and a cleanTitle function, return SManga with same description format and thumbnail handling
-    fun toSManga(baseUrl: String, cleanTitle: (String) -> String): SManga = SManga.create().apply {
+    // Accept mirrorRoot (root mirror without /v3x) and a cleanTitle function.
+    // thumbnail_url will be built using the provided mirrorRoot and handles absolute vs relative paths.
+    fun toSManga(mirrorRoot: String, cleanTitle: (String) -> String): SManga = SManga.create().apply {
         url = id
         title = cleanTitle(name.trim())
         author = authors?.joinToString { it.trim() }
@@ -76,8 +77,8 @@ data class SeriesDto(
             if (!summary?.text.isNullOrBlank()) {
                 append("\n\n----\n#### **Summary**\n${summary?.text?.trim()}")
             }
-            if (!extInfo.isNullOrEmpty()) {
-                append("\n\n----\n#### **Extra Info**\n$extInfo")
+            if (!extInfo?.code.isNullOrBlank()) {
+                append("\n\n----\n#### **Extra Info**\n${extInfo?.code?.trim()}")
             }
             if (!altNames.isNullOrEmpty()) {
                 append("\n\n----\n#### **Alternative Titles**\n")
@@ -97,8 +98,18 @@ data class SeriesDto(
                 }
         }
 
-        // Use only the original cover URL (prefix with provided baseUrl), as requested
-        thumbnail_url = urlCoverOri?.let { "$baseUrl$it" }
+        // Build thumbnail robustly:
+        // - if API returns absolute URL -> use as-is
+        // - if it returns "/path..." -> mirrorRoot + path
+        // - otherwise -> mirrorRoot + "/" + path
+        val thumb = urlCoverOri?.let { cover ->
+            when {
+                cover.startsWith("http", ignoreCase = true) -> cover
+                cover.startsWith("/") -> "${mirrorRoot.trimEnd('/')}$cover"
+                else -> "${mirrorRoot.trimEnd('/')}/$cover"
+            }
+        }
+        thumbnail_url = thumb
         status = parseStatus(originalStatus, uploadStatus)
         initialized = true
     }
@@ -120,6 +131,10 @@ data class SeriesDto(
     @Serializable
     data class SummaryDto(
         val text: String?,
+    )
+    @Serializable
+    data class ExtInfoDto(
+        val code: String?,
     )
 }
 

@@ -56,7 +56,7 @@ data class SeriesDto(
     val name: String,
     val slug: String,
     val summary: SummaryDto?,
-    val extraInfo: String? = null,
+    val extInfo: String? = null,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
@@ -76,8 +76,8 @@ data class SeriesDto(
             if (!summary?.text.isNullOrBlank()) {
                 append("\n\n----\n#### **Summary**\n${summary?.text?.trim()}")
             }
-            if (!extraInfo.isNullOrEmpty()) {
-                append("\n\n----\n#### **Extra Info**\n$extraInfo")
+            if (!extInfo.isNullOrEmpty()) {
+                append("\n\n----\n#### **Extra Info**\n$extInfo")
             }
             if (!altNames.isNullOrEmpty()) {
                 append("\n\n----\n#### **Alternative Titles**\n")

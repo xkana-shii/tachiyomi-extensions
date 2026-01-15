@@ -192,7 +192,7 @@ open class BatoToV3(
 
         val mangas = searchResponse.data.search.items
             .map { items ->
-                // ensure thumbnail is returned by using mirrorRoot as base like v4,
+                // ensure thumbnail is returned by using mirrorRoot as base,
                 // and apply title cleaning for display
                 items.data.toSManga(mirrorRoot, ::cleanTitleIfNeeded)
                     .apply { initialized = true }

@@ -38,15 +38,21 @@ open class BatoToV3(
 
     override val name: String = "Bato.to V3"
 
+    // baseUrl exposed to the app (WebView, intents, etc.) — include /v3x so the "main" site opens at mirror/v3x
     override val baseUrl: String
+        get() {
+            val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
+                .coerceAtMost(mirrors.size - 1)
+            return "${mirrors[index]}/v3x"
+        }
+
+    // root mirror without /v3x — use this for API calls and constructing manga/chapter links
+    private val mirrorRoot: String
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
                 .coerceAtMost(mirrors.size - 1)
             return mirrors[index]
         }
-
-    private val mainPageBaseUrl: String
-        get() = "$baseUrl/v3x"
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         // Mirror selection like v2: index-based mirror preference (shared, not per-language)
@@ -57,16 +63,6 @@ open class BatoToV3(
             entryValues = Array(mirrors.size) { it.toString() }
             summary = "%s"
             setDefaultValue("0")
-        }.let { screen.addPreference(it) }
-
-        // Cover quality (per-language)
-        ListPreference(screen.context).apply {
-            key = "${COVER_PREF_KEY}_$lang"
-            title = COVER_PREF_TITLE
-            entries = COVER_PREF_ENTRIES
-            entryValues = COVER_PREF_ENTRIES
-            setDefaultValue(COVER_PREF_DEFAULT_VALUE)
-            summary = "%s"
         }.let { screen.addPreference(it) }
 
         // Remove version info checkbox (like v2/v4)
@@ -118,14 +114,6 @@ open class BatoToV3(
         }.let { screen.addPreference(it) }
     }
 
-    private fun coverQuality(): CoverQuality {
-        return when (preferences.getString("${COVER_PREF_KEY}_$lang", COVER_PREF_DEFAULT_VALUE)) {
-            "Medium" -> CoverQuality.Medium
-            "Low" -> CoverQuality.Low
-            else -> CoverQuality.Original
-        }
-    }
-
     private fun isRemoveTitleVersion(): Boolean {
         return preferences.getBoolean("${REMOVE_TITLE_VERSION_PREF}_$lang", false)
     }
@@ -146,9 +134,11 @@ open class BatoToV3(
         .rateLimit(4)
         .build()
 
+    // Use mirrorRoot as referer for API calls and image requests to avoid /v3x being applied to all endpoints.
     override fun headersBuilder() = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
+        .add("Referer", "$mirrorRoot/")
 
+    // Keep popular simple: delegate to searchMangaRequest with views_d000 sort
     override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("views_d000")))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
@@ -160,7 +150,6 @@ open class BatoToV3(
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
         if (query.startsWith(SEARCH_PREFIX)) {
             val id = query.substringAfter(SEARCH_PREFIX)
-            // store only the id like v4
             val manga = SManga.create().apply { url = id }
             return fetchMangaDetails(manga).map {
                 MangasPage(listOf(it), false)
@@ -170,7 +159,6 @@ open class BatoToV3(
     }
 
     private fun getMangaId(url: String): String {
-        // If url is already an id, return it. If it's an old-style /series/<id>/..., extract the id.
         val trimmed = url.trim().trim('/')
         val parts = trimmed.split('/')
         return if (parts.size >= 2 && parts[0] == "series") parts[1] else url
@@ -203,18 +191,19 @@ open class BatoToV3(
             it.total > it.page
         }
 
-        return searchResponse.data.search.items
+        val mangas = searchResponse.data.search.items
             .map { items ->
-                items.data.toSManga(coverQuality())
+                // toSManga expects (baseUrl, cleanTitle) in the current v3 implementation
+                items.data.toSManga(mirrorRoot, ::cleanTitleIfNeeded)
                     .apply { initialized = true }
             }
-            .let { MangasPage(it, hasNextPage) }
+
+        return MangasPage(mangas, hasNextPage)
     }
 
     override fun getFilterList() = filters
 
     override fun mangaDetailsRequest(manga: SManga): Request {
-        // manga.url now stores the id only; support old-style URLs as well
         val id = getMangaId(manga.url)
         val payloadObj = ApiQueryPayload(id, DETAILS_QUERY)
         return apiRequest(payloadObj)
@@ -224,7 +213,7 @@ open class BatoToV3(
         val mangaData = response.parseAs<ApiDetailsResponse>()
 
         // Build SManga using the raw title (identity) so we can collect removed parts, then set cleaned title.
-        val manga = mangaData.data.comicNode.data.toSManga(coverQuality())
+        val manga = mangaData.data.comicNode.data.toSManga(mirrorRoot, { it })
 
         val removedParts = mutableListOf<String>()
         var cleanedTitle = manga.title ?: ""
@@ -254,6 +243,61 @@ open class BatoToV3(
         manga.description = description
 
         return manga
+    }
+
+    override fun getMangaUrl(manga: SManga): String {
+        // use mirrorRoot so manga links don't include /v3x
+        return "$mirrorRoot/title/${getMangaId(manga.url)}"
+    }
+
+    override fun chapterListRequest(manga: SManga): Request {
+        val id = getMangaId(manga.url)
+        val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
+        return apiRequest(payloadObj)
+    }
+
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val chapterList = response.parseAs<ApiChapterListResponse>()
+
+        return chapterList.data.chapters
+            .map { it.data.toSChapter() }
+            .sortedByDescending { it.chapter_number }
+    }
+
+    override fun getChapterUrl(chapter: SChapter): String {
+        // chapter.url stores the chapter id only; use mirrorRoot so link doesn't include /v3x
+        return "$mirrorRoot/title/chapter/${chapter.url}"
+    }
+
+    override fun pageListRequest(chapter: SChapter): Request {
+        val id = chapter.url
+        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
+        return apiRequest(payloadObj)
+    }
+
+    override fun pageListParse(response: Response): List<Page> {
+        val pages = response.parseAs<ApiPageListResponse>()
+
+        return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
+            Page(index, "", image)
+        } ?: emptyList()
+    }
+
+    override fun imageUrlParse(response: Response): String {
+        throw UnsupportedOperationException("Not Used")
+    }
+
+    private fun cleanTitleIfNeeded(title: String): String {
+        var tempTitle = title
+        customRemoveTitle().takeIf { it.isNotEmpty() }?.let { customRegex ->
+            runCatching {
+                tempTitle = tempTitle.replace(Regex(customRegex), "")
+            }
+        }
+        if (isRemoveTitleVersion()) {
+            tempTitle = tempTitle.replace(titleRegex, "")
+        }
+        return tempTitle.trim()
     }
 
     private fun autoMarkdownLinks(input: String): String {
@@ -299,49 +343,6 @@ open class BatoToV3(
         }.trim()
     }
 
-    override fun getMangaUrl(manga: SManga): String {
-        // manga.url stores the id only; support old-style input
-        return "$baseUrl/title/${getMangaId(manga.url)}"
-    }
-
-    override fun chapterListRequest(manga: SManga): Request {
-        val id = getMangaId(manga.url)
-        val payloadObj = ApiQueryPayload(id, CHAPTERS_QUERY)
-        return apiRequest(payloadObj)
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val chapterList = response.parseAs<ApiChapterListResponse>()
-
-        return chapterList.data.chapters
-            .map { it.data.toSChapter() }
-            .sortedByDescending { it.chapter_number }
-    }
-
-    override fun getChapterUrl(chapter: SChapter): String {
-        // chapter.url now stores the chapter id only
-        return "$baseUrl/title/chapter/${chapter.url}"
-    }
-
-    override fun pageListRequest(chapter: SChapter): Request {
-        // chapter.url stores the chapter id, so use it directly
-        val id = chapter.url
-        val payloadObj = ApiQueryPayload(id, PAGES_QUERY)
-        return apiRequest(payloadObj)
-    }
-
-    override fun pageListParse(response: Response): List<Page> {
-        val pages = response.parseAs<ApiPageListResponse>()
-
-        return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
-            Page(index, "", image)
-        } ?: emptyList()
-    }
-
-    override fun imageUrlParse(response: Response): String {
-        throw UnsupportedOperationException("Not Used")
-    }
-
     private inline fun <reified R> List<*>.firstInstanceOrNull(): R? =
         filterIsInstance<R>().firstOrNull()
 
@@ -356,7 +357,8 @@ open class BatoToV3(
             .add("Content-Type", payload.contentType().toString())
             .build()
 
-        return POST("$baseUrl/apo", apiHeaders, payload)
+        // POST to mirrorRoot/apo so API calls do not include /v3x
+        return POST("$mirrorRoot/apo", apiHeaders, payload)
     }
 
     companion object {
@@ -367,7 +369,6 @@ open class BatoToV3(
         val chapterNumRegex by lazy { Regex("""\.0+$""") }
         const val SEARCH_PREFIX = "ID:"
         private const val RESTART_TACHIYOMI = "Restart Tachiyomi to apply new setting."
-        private const val COVER_PREF_KEY = "COVER"
         private const val COVER_PREF_TITLE = "Cover Quality"
         private val COVER_PREF_ENTRIES = arrayOf("Original", "Medium", "Low")
         private val COVER_PREF_DEFAULT_VALUE = COVER_PREF_ENTRIES[0]
@@ -405,8 +406,7 @@ open class BatoToV3(
         // Preference key for removing version info (per-language)
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
 
-        // Title regex used to strip version info (matches bracketed or parenthesized tags)
-        // Use same pattern as v2/v4 (allow empty brackets/parentheses)
+        // Title regex used to strip version info (matches bracketed or parenthesized tags, same as v2/v4)
         private val titleRegex by lazy { Regex("""\s*(?:\([^)]*\)|\[[^\]]*\])""", RegexOption.IGNORE_CASE) }
 
         // Custom remove regex key (also available on the wrapper)

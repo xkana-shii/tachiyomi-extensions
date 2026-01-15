@@ -56,6 +56,7 @@ data class SeriesDto(
     val name: String,
     val slug: String,
     val summary: SummaryDto?,
+    val extraInfo: String? = null,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
@@ -66,18 +67,25 @@ data class SeriesDto(
     @SerialName("urlCover600") val coverMedium: String?,
     @SerialName("urlCover300") val coverLow: String?,
 ) {
-    fun toSManga(cover: CoverQuality = CoverQuality.Original): SManga = SManga.create().apply {
-        title = name.trim()
+    fun toSManga(baseUrl: String, cleanTitle: (String) -> String): SManga = SManga.create().apply {
         url = id
+        title = cleanTitle(name.trim())
         author = authors?.joinToString { it.trim() }
         artist = artists?.joinToString { it.trim() }
-        description = summary?.text?.trim()
-        if (!altNames.isNullOrEmpty()) {
-            description += altNames.joinToString(
-                prefix = "\n\nAlternative Names: \n* ",
-                separator = "\n* ",
-            ) { it.trim() }
-        }
+
+        description = buildString {
+            if (!summary?.text.isNullOrBlank()) {
+                append("\n\n----\n#### **Summary**\n${summary?.text?.trim()}")
+            }
+            if (!extraInfo.isNullOrEmpty()) {
+                append("\n\n----\n#### **Extra Info**\n$extraInfo")
+            }
+            if (!altNames.isNullOrEmpty()) {
+                append("\n\n----\n#### **Alternative Titles**\n")
+                append(altNames.joinToString("\n- ", prefix = "- "))
+            }
+        }.trim()
+
         genre = genres?.joinToString { genre ->
             genre
                 .replace("_", " ")
@@ -89,12 +97,9 @@ data class SeriesDto(
                     }
                 }
         }
-        thumbnail_url = when (cover) {
-            CoverQuality.Medium -> coverMedium
-            CoverQuality.Low -> coverLow
-            else -> coverOriginal
-        }
+        thumbnail_url = coverOriginal?.let { "$baseUrl$it" }
         status = parseStatus(originalStatus, uploadStatus)
+        initialized = true
     }
 
     private fun parseStatus(originalStatus: String?, uploadStatus: String?): Int {
@@ -115,12 +120,6 @@ data class SeriesDto(
     data class SummaryDto(
         val text: String?,
     )
-}
-
-enum class CoverQuality {
-    Original,
-    Medium,
-    Low,
 }
 
 @Serializable
@@ -153,7 +152,7 @@ data class ApiChapterListResponse(
                         name += ": $title"
                     }
                     chapter_number = chaNum
-                    // Use only the scanlator name(s). If none available, fall back to "Unknown" (same as v2).
+                    // Use only the scanlator name(s). If none available, fall back to "Unknown".
                     val scanlatorName = groups
                         ?.mapNotNull { it.data.name?.trim() }
                         ?.filter { it.isNotEmpty() }
@@ -169,7 +168,7 @@ data class ApiChapterListResponse(
                 }
 
                 private fun JsonPrimitive.parseDate(): Long? {
-                    // api sometimes return string and sometimes long 🗿
+                    // api sometimes return string and sometimes long
                     return runCatching {
                         if (this.isString) {
                             BatoToV3.DATE_FORMATTER.parse(this.toString())!!.time

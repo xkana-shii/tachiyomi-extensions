@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.all.batotov3
 import android.content.SharedPreferences
 import android.text.Editable
 import android.text.TextWatcher
+import android.util.Log
 import android.widget.Button
 import android.widget.Toast
 import androidx.preference.CheckBoxPreference
@@ -21,6 +22,8 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -129,8 +132,10 @@ open class BatoToV3(
         coerceInputValues = true
     }
 
+    // Add ImageFallbackInterceptor (ported from v4) to the client so image requests can fallback to alternate mirrors.
     override val client: OkHttpClient = super.client.newBuilder()
         .rateLimit(4)
+        .addInterceptor(ImageFallbackInterceptor())
         .build()
 
     // Use mirrorRoot as referer for API calls and images (avoid /v3x leaking into endpoints)
@@ -192,6 +197,13 @@ open class BatoToV3(
 
         val mangas = searchResponse.data.search.items
             .map { items ->
+                // Log full SeriesDto payload for debugging (shows exactly what came from API)
+                try {
+                    Log.d(TAG, "Search SeriesDto: ${json.encodeToString(items.data)}")
+                } catch (t: Throwable) {
+                    Log.d(TAG, "Search SeriesDto: <failed to encode> ${items.data}")
+                }
+
                 // ensure thumbnail is returned by using mirrorRoot as base,
                 // and apply title cleaning for display
                 items.data.toSManga(mirrorRoot, ::cleanTitleIfNeeded)
@@ -211,6 +223,13 @@ open class BatoToV3(
 
     override fun mangaDetailsParse(response: Response): SManga {
         val mangaData = response.parseAs<ApiDetailsResponse>()
+
+        // Log full SeriesDto payload for debugging (shows exactly what came from API)
+        try {
+            Log.d(TAG, "Details SeriesDto: ${json.encodeToString(mangaData.data.comicNode.data)}")
+        } catch (t: Throwable) {
+            Log.d(TAG, "Details SeriesDto: <failed to encode> ${mangaData.data.comicNode.data}")
+        }
 
         // Build SManga using the raw title (identity) so we can collect removed parts, then set cleaned title.
         val manga = mangaData.data.comicNode.data.toSManga(mirrorRoot, { it })
@@ -361,6 +380,72 @@ open class BatoToV3(
         return POST("$mirrorRoot/apo", apiHeaders, payload)
     }
 
+    /**
+     * ImageFallbackInterceptor
+     *
+     * Tries alternate mirrors when an image request fails (4xx/5xx). Ported to v3 to match v4 behavior.
+     * Only attempts fallback for likely image requests (common image extensions).
+     */
+    private inner class ImageFallbackInterceptor : Interceptor {
+        private val imageExts = listOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif")
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val url = request.url
+            val path = url.encodedPath.lowercase(Locale.ROOT)
+
+            // Only attempt fallback for requests that look like image requests.
+            val looksLikeImage = imageExts.any { path.endsWith(it) }
+            if (!looksLikeImage) {
+                return chain.proceed(request)
+            }
+
+            var response = chain.proceed(request)
+            if (response.isSuccessful) return response
+
+            // If failed, try alternate mirrors (skip original host)
+            response.close()
+            val originalHost = url.host
+            val pathAndQuery = buildString {
+                append(url.encodedPath)
+                if (!url.encodedQuery.isNullOrEmpty()) append("?").append(url.encodedQuery)
+            }
+
+            var lastResp: Response? = null
+            for (mirror in mirrors) {
+                // Build candidate only if host differs from original
+                val mirrorHost = try {
+                    mirror.toHttpUrlOrNull()?.host
+                } catch (_: Throwable) {
+                    null
+                } ?: continue
+                if (mirrorHost.equals(originalHost, ignoreCase = true)) continue
+
+                val candidate = (mirror.trimEnd('/') + pathAndQuery).toHttpUrlOrNull() ?: continue
+                val newReq = request.newBuilder()
+                    .url(candidate)
+                    .build()
+
+                try {
+                    val candidateResp = chain.proceed(newReq)
+                    if (candidateResp.isSuccessful) {
+                        Log.d(TAG, "ImageFallbackInterceptor: succeeded with mirror $mirror for $pathAndQuery")
+                        return candidateResp
+                    } else {
+                        // keep the last response to return if all fail
+                        lastResp = candidateResp
+                        candidateResp.close()
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "ImageFallbackInterceptor: candidate $mirror failed: ${e.message}")
+                }
+            }
+
+            // If none succeeded, return the last response we got or the original one
+            return lastResp ?: chain.proceed(request)
+        }
+    }
+
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaTypeOrNull()
         val DATE_FORMATTER by lazy {
@@ -369,6 +454,9 @@ open class BatoToV3(
         val chapterNumRegex by lazy { Regex("""\.0+$""") }
         const val SEARCH_PREFIX = "ID:"
         private const val RESTART_TACHIYOMI = "Restart Tachiyomi to apply new setting."
+
+        // Log tag
+        private const val TAG = "BatoToV3"
 
         // Mirror preference key shared with v2/v4 (index-based)
         private const val MIRROR_PREF_KEY = "MIRROR"

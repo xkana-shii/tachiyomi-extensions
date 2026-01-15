@@ -56,7 +56,7 @@ data class SeriesDto(
     val name: String,
     val slug: String,
     val summary: SummaryDto?,
-    val extInfo: ExtInfoDto?,
+    @SerialName("extInfo") val extInfo: ExtInfoDto? = null,
     val altNames: List<String>? = emptyList(),
     val authors: List<String>? = emptyList(),
     val artists: List<String>? = emptyList(),
@@ -77,8 +77,10 @@ data class SeriesDto(
             if (!summary?.text.isNullOrBlank()) {
                 append("\n\n----\n#### **Summary**\n${summary?.text?.trim()}")
             }
-            if (!extInfo?.code.isNullOrBlank()) {
-                append("\n\n----\n#### **Extra Info**\n${extInfo?.code?.trim()}")
+            // extInfo is an object with `code` (per API). Use extInfo.code here.
+            val extra = extInfo?.code
+            if (!extra.isNullOrEmpty()) {
+                append("\n\n----\n#### **Extra Info**\n${extra.trim()}")
             }
             if (!altNames.isNullOrEmpty()) {
                 append("\n\n----\n#### **Alternative Titles**\n")
@@ -132,9 +134,10 @@ data class SeriesDto(
     data class SummaryDto(
         val text: String?,
     )
+
     @Serializable
     data class ExtInfoDto(
-        val code: String?,
+        val code: String? = null,
     )
 }
 

@@ -9,7 +9,7 @@ import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
-import eu.kanade.tachiyomi.extension.all.batoto.BatoTo.Companion.BATOTO_REMOVE_TITLE_CUSTOM_PREF
+import eu.kanade.tachiyomi.extension.all.batoto.ImageServerManager
 import eu.kanade.tachiyomi.lib.cryptoaes.CryptoAES
 import eu.kanade.tachiyomi.lib.cryptoaes.Deobfuscator
 import eu.kanade.tachiyomi.network.GET
@@ -63,6 +63,11 @@ open class BatoToV2(
 
             return mirrors[index]
         }
+        .build()
+
+    private val imageServerManager: ImageServerManager = ImageServerManager()
+
+    private val json: Json by injectLazy()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         val mirrorPref = ListPreference(screen.context).apply {
@@ -685,52 +690,58 @@ open class BatoToV2(
 
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val response = chain.proceed(request)
-        if (response.isSuccessful) return response
 
+        // Extract server, or proceed normally if not found
         val urlString = request.url.toString()
-        response.close()
+        val originalServer = this.imageServerManager.extractServerFromUrl(urlString) ?: return chain.proceed(request)
 
-        if (!SERVER_PATTERN.containsMatchIn(urlString)) {
-            return chain.proceed(request)
+        // Try original server if not skipped
+        if (!this.imageServerManager.shouldSkip(originalServer)) {
+            tryServer(chain, request, originalServer)?.let { return it }
         }
 
-        // Primary response attempt with short timeout
-        val primaryResponse = try {
-            chain
-                .withConnectTimeout(1, TimeUnit.SECONDS)
-                .withReadTimeout(1, TimeUnit.SECONDS)
-                .proceed(request)
-        } catch (_: Exception) {
-            null
-        }
+        // Try fallback servers
+        for (server in this.imageServerManager.fallbackServers) {
+            if (this.imageServerManager.shouldSkip(server)) continue
 
-        if (primaryResponse?.isSuccessful == true) return primaryResponse
-        primaryResponse?.closeQuietly()
-
-        val servers = (0..30).map { "n%02d".format(it) }.shuffled() +
-            (0..9).map { "k%02d".format(it) }.shuffled()
-
-        for (server in servers) {
-            val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-            if (newUrl == urlString) continue
-
+            val newUrl = this.imageServerManager.replaceServerInUrl(urlString, server)
             val newRequest = request.newBuilder().url(newUrl).build()
 
-            try {
-                val newResponse = chain
-                    .withConnectTimeout(1, TimeUnit.SECONDS)
-                    .withReadTimeout(3, TimeUnit.SECONDS)
-                    .proceed(newRequest)
-
-                if (newResponse.isSuccessful) return newResponse
-                newResponse.close()
-            } catch (_: Exception) {
-                // ignored
-            }
+            tryServer(chain, newRequest, server, withTimeout = true)?.let { return it }
         }
 
         return chain.proceed(request)
+    }
+
+    private fun tryServer(
+        chain: Interceptor.Chain,
+        request: Request,
+        server: String,
+        withTimeout: Boolean = false,
+    ): Response? {
+        return try {
+            // FORCE SHORT TIMEOUTS FOR FALLBACKS
+            // If a fallback server doesn't answer in 5 seconds, kill it and move to next server.
+            val modifiedChain = if (withTimeout) {
+                chain.withConnectTimeout(5, TimeUnit.SECONDS)
+                    .withReadTimeout(10, TimeUnit.SECONDS)
+            } else {
+                chain
+            }
+
+            val response = modifiedChain.proceed(request)
+            imageServerManager.recordImageServerStatus(server, response.code)
+
+            if (response.isSuccessful) {
+                response
+            } else {
+                response.close()
+                null
+            }
+        } catch (_: Exception) {
+            imageServerManager.recordImageServerStatus(server, 0) // Unknown error
+            null
+        }
     }
 
     override fun getFilterList() = FilterList(
@@ -1196,7 +1207,6 @@ open class BatoToV2(
     }
 
     companion object {
-        private val SERVER_PATTERN = Regex("https://[a-zA-Z]\\d{2}")
         private val seriesUrlRegex = Regex(""".*/series/(\d+)/.*""")
         private val seriesIdRegex = Regex("""series/(\d+)""")
         private val chapterIdRegex = Regex("""/chapter/(\d+)""") // /chapter/4016325

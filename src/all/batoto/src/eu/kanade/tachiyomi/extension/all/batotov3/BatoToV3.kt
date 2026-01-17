@@ -459,8 +459,6 @@ open class BatoToV3(
         }
         val chapterNumRegex by lazy { Regex("""\.0+$""") }
         const val SEARCH_PREFIX = "ID:"
-        private const val RESTART_TACHIYOMI = "Restart Tachiyomi to apply new setting."
-
         // Log tag
         private const val TAG = "BatoToV3"
 

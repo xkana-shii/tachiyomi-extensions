@@ -11,7 +11,6 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
@@ -22,7 +21,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -30,7 +29,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.internal.closeQuietly
-import okio.IOException
 import rx.Observable
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -135,7 +133,7 @@ open class BatoToV3(
         coerceInputValues = true
     }
 
-    // Use the same image fallback interceptor implementation as v4.
+    // Use the v2-style image fallback interceptor: detect image requests by extension, try server prefixes (nXX/kXX).
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .addInterceptor(::imageFallbackInterceptor)
         .addNetworkInterceptor { chain ->
@@ -362,13 +360,10 @@ open class BatoToV3(
     override fun pageListParse(response: Response): List<Page> {
         val pages = response.parseAs<ApiPageListResponse>()
 
-        // Build Page.imageUrl with PAGE_FRAGMENT so v4-style imageFallbackInterceptor sees page image requests.
+        // Keep building pages with fragment when possible, but fallback to raw URL if parsing fails.
         return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
             val imageWithFragment = try {
-                image.toHttpUrl().newBuilder()
-                    .fragment(PAGE_FRAGMENT)
-                    .build()
-                    .toString()
+                image.toHttpUrlOrNull()?.newBuilder()?.fragment(PAGE_FRAGMENT)?.build()?.toString() ?: image
             } catch (e: Exception) {
                 Log.d(TAG, "pageListParse: failed to parse image url '$image' -> ${e.message}")
                 image
@@ -403,47 +398,42 @@ open class BatoToV3(
     }
 
     /**
-     * Copy of v4 imageFallbackInterceptor implementation with extra logging.
-     * Attempts fast timeouts and multiple server prefixes on page image requests.
+     * Image fallback interceptor using server prefixes (nXX / kXX) like v2/v4.
+     * Follows the exact flow you provided: quick primary check, short-timeout primary retry,
+     * then iterate servers list (n00..n30, k00..k09) replacing the SERVER_PATTERN in the URL.
      */
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        Log.d(TAG, "imageFallbackInterceptor: entry url='${request.url}' fragment='${request.url.fragment}'")
-
-        if (request.url.fragment != PAGE_FRAGMENT) {
-            Log.d(TAG, "imageFallbackInterceptor: fragment != PAGE_FRAGMENT -> skipping")
-            return chain.proceed(request)
-        }
+        val response = chain.proceed(request)
+        if (response.isSuccessful) return response
 
         val urlString = request.url.toString()
+        response.close()
+
         if (!SERVER_PATTERN.containsMatchIn(urlString)) {
-            Log.d(TAG, "imageFallbackInterceptor: SERVER_PATTERN not matched for url='$urlString' -> skipping")
             return chain.proceed(request)
         }
 
+        // Primary response attempt with short timeout
         val primaryResponse = try {
             chain
                 .withConnectTimeout(1, TimeUnit.SECONDS)
                 .withReadTimeout(1, TimeUnit.SECONDS)
                 .proceed(request)
-        } catch (ex: Exception) {
-            Log.d(TAG, "imageFallbackInterceptor: primary request threw: ${ex.message}")
+        } catch (_: Exception) {
             null
         }
 
-        if (primaryResponse?.isSuccessful == true) {
-            Log.d(TAG, "imageFallbackInterceptor: primary response successful")
-            return primaryResponse
-        }
+        if (primaryResponse?.isSuccessful == true) return primaryResponse
         primaryResponse?.closeQuietly()
-        Log.d(TAG, "imageFallbackInterceptor: primary failed, trying alternatives for '$urlString'")
 
         val servers = (0..30).map { "n%02d".format(it) }.shuffled() +
             (0..9).map { "k%02d".format(it) }.shuffled()
 
         for (server in servers) {
             val newUrl = urlString.replace(SERVER_PATTERN, "https://$server")
-            Log.d(TAG, "imageFallbackInterceptor: trying server=$server -> $newUrl")
+            if (newUrl == urlString) continue
+
             val newRequest = request.newBuilder().url(newUrl).build()
 
             try {
@@ -452,18 +442,13 @@ open class BatoToV3(
                     .withReadTimeout(3, TimeUnit.SECONDS)
                     .proceed(newRequest)
 
-                if (newResponse.isSuccessful) {
-                    Log.d(TAG, "imageFallbackInterceptor: success with server=$server")
-                    return newResponse
-                }
-                Log.d(TAG, "imageFallbackInterceptor: server=$server returned ${newResponse.code}")
+                if (newResponse.isSuccessful) return newResponse
                 newResponse.close()
-            } catch (e: Exception) {
-                Log.d(TAG, "imageFallbackInterceptor: server=$server threw: ${e.message}")
+            } catch (_: Exception) {
+                // ignored
             }
         }
 
-        Log.d(TAG, "imageFallbackInterceptor: no alternative server succeeded, proceeding with original request")
         return chain.proceed(request)
     }
 

@@ -650,7 +650,7 @@ class BatoToV4(
 private const val MIRROR_PREF_KEY = "MIRROR"
 private val mirrors = arrayOf(
     "https://bato.si",
-    "https://bato.ing"
+    "https://bato.ing",
     "https://xbat.me",
 )
 

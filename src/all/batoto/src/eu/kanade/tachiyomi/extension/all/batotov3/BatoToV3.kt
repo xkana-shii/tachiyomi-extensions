@@ -379,11 +379,6 @@ open class BatoToV3(
         return POST("$mirrorRoot/apo", apiHeaders, payload)
     }
 
-    /**
-     * Image fallback interceptor using server prefixes (nXX / kXX) like v2/v4.
-     * Follows the exact flow you provided: quick primary check, short-timeout primary retry,
-     * then iterate servers list (n00..n30, k00..k09) replacing the SERVER_PATTERN in the URL.
-     */
     private fun imageFallbackInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val response = chain.proceed(request)

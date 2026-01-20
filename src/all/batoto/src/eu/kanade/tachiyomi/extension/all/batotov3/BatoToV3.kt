@@ -42,7 +42,6 @@ open class BatoToV3(
 
     override val name: String = "Bato.to V3"
 
-    // exposed to app (webview/intents) — main site path includes /v3x
     override val baseUrl: String
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
@@ -50,7 +49,6 @@ open class BatoToV3(
             return "${mirrors[index]}/v3x"
         }
 
-    // mirror root used for API/thumbnail construction (no /v3x)
     private val mirrorRoot: String
         get() {
             val index = preferences.getString(MIRROR_PREF_KEY, "0")!!.toInt()
@@ -59,7 +57,6 @@ open class BatoToV3(
         }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        // Mirror selection (shared)
         ListPreference(screen.context).apply {
             key = MIRROR_PREF_KEY
             title = "Preferred Mirror"
@@ -69,7 +66,6 @@ open class BatoToV3(
             setDefaultValue("0")
         }.let { screen.addPreference(it) }
 
-        // Remove version info checkbox (per-language)
         CheckBoxPreference(screen.context).apply {
             key = "${REMOVE_TITLE_VERSION_PREF}_$lang"
             title = "Remove version information from entry titles"
@@ -77,7 +73,6 @@ open class BatoToV3(
             setDefaultValue(false)
         }.let { screen.addPreference(it) }
 
-        // Custom remove regex (shared key)
         EditTextPreference(screen.context).apply {
             key = BATOTO_REMOVE_TITLE_CUSTOM_PREF
             title = "Custom regex to be removed from title"
@@ -133,7 +128,6 @@ open class BatoToV3(
         coerceInputValues = true
     }
 
-    // Use the v2-style image fallback interceptor: detect image requests by extension, try server prefixes (nXX/kXX).
     override val client: OkHttpClient = network.cloudflareClient.newBuilder()
         .addInterceptor(::imageFallbackInterceptor)
         .addNetworkInterceptor { chain ->
@@ -145,11 +139,9 @@ open class BatoToV3(
         }
         .build()
 
-    // Use mirrorRoot as referer for API calls and images (avoid /v3x leaking into endpoints)
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$mirrorRoot/")
 
-    // Keep popular simple: delegate to searchMangaRequest with views_d000 sort
     override fun popularMangaRequest(page: Int) = searchMangaRequest(page, "", FilterList(SortFilter("views_d000")))
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
@@ -204,15 +196,12 @@ open class BatoToV3(
 
         val mangas = searchResponse.data.search.items
             .map { items ->
-                // Log full SeriesDto payload for debugging (shows exactly what came from API)
                 try {
                     Log.d(TAG, "Search SeriesDto: ${json.encodeToString(items.data)}")
                 } catch (t: Throwable) {
                     Log.d(TAG, "Search SeriesDto: <failed to encode> ${items.data}")
                 }
 
-                // ensure thumbnail is returned by using mirrorRoot as base,
-                // and apply title cleaning for display
                 items.data.toSManga(mirrorRoot, ::cleanTitleIfNeeded)
                     .apply { initialized = true }
             }
@@ -231,14 +220,12 @@ open class BatoToV3(
     override fun mangaDetailsParse(response: Response): SManga {
         val mangaData = response.parseAs<ApiDetailsResponse>()
 
-        // Log full SeriesDto payload for debugging (shows exactly what came from API)
         try {
             Log.d(TAG, "Details SeriesDto: ${json.encodeToString(mangaData.data.comicNode.data)}")
         } catch (t: Throwable) {
             Log.d(TAG, "Details SeriesDto: <failed to encode> ${mangaData.data.comicNode.data}")
         }
 
-        // Build SManga using the raw title (identity) so we can collect removed parts, then set cleaned title.
         val manga = mangaData.data.comicNode.data.toSManga(mirrorRoot, { it })
 
         val removedParts = mutableListOf<String>()
@@ -255,7 +242,6 @@ open class BatoToV3(
         if (isRemoveTitleVersion()) removeAndCollect(titleRegex)
         cleanedTitle = cleanedTitle.trim()
 
-        // Set cleaned title (so UI shows the cleaned title)
         manga.title = cleanedTitle
 
         val description = buildString {
@@ -328,7 +314,6 @@ open class BatoToV3(
     }
 
     override fun getMangaUrl(manga: SManga): String {
-        // return mirror root URL for manga (no /v3x) so webview opens correct path
         return "$mirrorRoot/title/${getMangaId(manga.url)}"
     }
 
@@ -347,7 +332,6 @@ open class BatoToV3(
     }
 
     override fun getChapterUrl(chapter: SChapter): String {
-        // return mirror root URL for chapter (no /v3x) so webview opens correct path
         return "$mirrorRoot/title/chapter/${chapter.url}"
     }
 
@@ -360,7 +344,6 @@ open class BatoToV3(
     override fun pageListParse(response: Response): List<Page> {
         val pages = response.parseAs<ApiPageListResponse>()
 
-        // Keep building pages with fragment when possible, but fallback to raw URL if parsing fails.
         return pages.data.pageList.data.imageFiles?.mapIndexed { index, image ->
             val imageWithFragment = try {
                 image.toHttpUrlOrNull()?.newBuilder()?.fragment(PAGE_FRAGMENT)?.build()?.toString() ?: image
@@ -393,7 +376,6 @@ open class BatoToV3(
             .add("Content-Type", payload.contentType().toString())
             .build()
 
-        // POST to mirror root /apo so API calls use mirrorRoot (no /v3x) while UI/opening uses baseUrl (/v3x)
         return POST("$mirrorRoot/apo", apiHeaders, payload)
     }
 
@@ -414,7 +396,6 @@ open class BatoToV3(
             return chain.proceed(request)
         }
 
-        // Primary response attempt with short timeout
         val primaryResponse = try {
             chain
                 .withConnectTimeout(1, TimeUnit.SECONDS)
@@ -445,7 +426,6 @@ open class BatoToV3(
                 if (newResponse.isSuccessful) return newResponse
                 newResponse.close()
             } catch (_: Exception) {
-                // ignored
             }
         }
 
@@ -459,10 +439,8 @@ open class BatoToV3(
         }
         val chapterNumRegex by lazy { Regex("""\.0+$""") }
         const val SEARCH_PREFIX = "ID:"
-        // Log tag
         private const val TAG = "BatoToV3"
 
-        // Mirror preference key shared with v2/v4 (index-based)
         private const val MIRROR_PREF_KEY = "MIRROR"
         private val mirrors = arrayOf(
             "https://bato.to",
@@ -492,13 +470,10 @@ open class BatoToV3(
             "https://zbato.org",
         )
 
-        // Preference key for removing version info (per-language)
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
 
-        // Title regex used to strip version info (matches bracketed or parenthesized tags, same as v2/v4)
         private val titleRegex by lazy { Regex("""\s*(?:\([^)]*\)|\[[^\]]*\])""", RegexOption.IGNORE_CASE) }
 
-        // Custom remove regex key (also available on the wrapper)
         const val BATOTO_REMOVE_TITLE_CUSTOM_PREF = "BATOTO_REMOVE_TITLE_CUSTOM"
 
         private const val PAGE_FRAGMENT = "page"

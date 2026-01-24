@@ -1,10 +1,10 @@
 ext {
-    kmkVersionCode = 1
+    kmkVersionCode = 2
     extName = 'Manga District'
     extClass = '.MangaDistrict'
     themePkg = 'madara'
     baseUrl = 'https://mangadistrict.com'
-    overrideVersionCode = 13
+    overrideVersionCode = 14
     isNsfw = true
 }
 

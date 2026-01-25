@@ -63,23 +63,19 @@ class ComicNode(
         thumbnail_url = urlCoverOri?.let { "$baseUrl$it" }
         description = buildString {
             if (!summary.isNullOrEmpty()) {
-                append(summary)
+                append("\n\n----\n#### **Summary**\n$summary")
             }
             if (!extraInfo.isNullOrEmpty()) {
-                if (isNotEmpty()) append("\n\nExtra Info:\n")
-                append(extraInfo)
+                append("\n\n----\n#### **Extra Info**\n$extraInfo")
             }
             if (!altNames.isNullOrEmpty()) {
-                if (isNotEmpty()) append("\n\n")
-                append("Alternative Titles:\n")
-                append(altNames.joinToString("\n") { "- $it" })
+                append("\n\n----\n#### **Alternative Titles**\n")
+                append(altNames.joinToString("\n- ", prefix = "- "))
             }
-        }.replace(urlRegex, "<$1>")
+        }.trim()
         initialized = true
     }
 }
-
-private val urlRegex = Regex("""(https?://[^\s<"]+)""")
 
 // ************ Comic Search ************ //
 
@@ -145,8 +141,16 @@ class ChapterListData(
             }
             serial?.let { chapter_number = it }
             date_upload = dateModify ?: dateCreate ?: 0L
-            scanlator = groupNodes?.filter { it?.data?.name != null }?.joinToString { it!!.data!!.name!! }
-                ?: userNode?.data?.name ?: "\u200B"
+
+            // Use only the scanlator name(s). If none available, fall back to "Unknown" (same as v2).
+            val groupNames = groupNodes
+                ?.mapNotNull { it?.data?.name?.trim() }
+                ?.filter { it.isNotEmpty() }
+                ?.joinToString()
+            val uploaderName = userNode?.data?.name?.trim()
+            scanlator = groupNames?.takeIf { it.isNotBlank() }
+                ?: uploaderName?.takeIf { it.isNotBlank() }
+                    ?: "Unknown"
         }
     }
 }

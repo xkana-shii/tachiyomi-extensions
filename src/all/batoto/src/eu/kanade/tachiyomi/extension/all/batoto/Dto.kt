@@ -65,10 +65,10 @@ class ComicNode(
             if (!summary.isNullOrEmpty()) {
                 append("\n\n----\n#### **Summary**\n$summary")
             }
-            if (!extraInfo.isNullOrEmpty()) {
+            if (!extraInfo.isNullOrEmpty() && extraInfo.isNotEmpty()) {
                 append("\n\n----\n#### **Extra Info**\n$extraInfo")
             }
-            if (!altNames.isNullOrEmpty()) {
+            if (!altNames.isNullOrEmpty() && altNames.isNotEmpty()) {
                 append("\n\n----\n#### **Alternative Titles**\n")
                 append(altNames.joinToString("\n- ", prefix = "- "))
             }
@@ -150,7 +150,7 @@ class ChapterListData(
             val uploaderName = userNode?.data?.name?.trim()
             scanlator = groupNames?.takeIf { it.isNotBlank() }
                 ?: uploaderName?.takeIf { it.isNotBlank() }
-                    ?: "Unknown"
+                ?: "Unknown"
         }
     }
 }

@@ -15,7 +15,6 @@ import eu.kanade.tachiyomi.lib.randomua.getPrefCustomUA
 import eu.kanade.tachiyomi.lib.randomua.getPrefUAType
 import eu.kanade.tachiyomi.lib.randomua.setRandomUserAgent
 import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -54,7 +53,6 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
-        .rateLimit(1, 2)
         .setRandomUserAgent(
             preferences.getPrefUAType(),
             preferences.getPrefCustomUA(),
@@ -325,8 +323,85 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
     private fun pageListParseMobile(document: Document): List<Page> {
         val pagesCount = document.select("div.controls ul#dropdown-menu-page li").size
-        val pageUrl = document.location().removeSuffix("/").substringBeforeLast("-")
-        return IntRange(1, pagesCount).map { Page(it, url = "$pageUrl-$it/") }
+
+        // Build base for batch URLs (emulates Kotatsu behavior)
+        val fullUrl = document.location().removeSuffix("/")
+        val lastSegment = fullUrl.substringAfterLast("/")
+        val isPgFormat = lastSegment.startsWith("pg-")
+        val pageNumber = lastSegment.toIntOrNull()
+        val isPageNumber = pageNumber != null && pageNumber < 1000
+
+        val cleanUrl = fullUrl
+        val baseUrl: String
+        val buildBatchUrl: (Int) -> String
+
+        if (isPgFormat) {
+            baseUrl = cleanUrl.substringBeforeLast("/")
+            buildBatchUrl = { batchNum -> "$baseUrl/pg-$batchNum/" }
+        } else if (isPageNumber) {
+            baseUrl = cleanUrl.substringBeforeLast("/")
+            buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+        } else {
+            baseUrl = cleanUrl
+            buildBatchUrl = { batchNum -> "$baseUrl/$batchNum/" }
+        }
+
+        val batchSize = 5
+        val allImages = mutableListOf<String>()
+        var batchStart = 1
+
+        while (allImages.size < pagesCount) {
+            val batchUrl = buildBatchUrl(batchStart)
+            val req = GET(batchUrl, headers)
+            val resp = client.newCall(req).execute()
+            val bodyStr = resp.body?.string() ?: break
+            val batchDoc = org.jsoup.Jsoup.parse(bodyStr, baseUrl)
+
+            val imgsrcsScript = batchDoc.selectFirst("script:containsData(imgsrcs)")?.html()
+                ?: break
+            val imgsrcRaw = imgSrcsRegex.find(imgsrcsScript)?.groupValues?.get(1)
+                ?: break
+            val imgsrcs = Base64.decode(imgsrcRaw, Base64.DEFAULT)
+
+            val chapterJsUrl = batchDoc.getElementsByTag("script").first {
+                it.attr("src").contains("chapter.js", ignoreCase = true)
+            }.attr("abs:src")
+
+            val obfuscatedChapterJs = client.newCall(GET(chapterJsUrl, headers)).execute().body?.string() ?: break
+            val deobfChapterJs = SoJsonV4Deobfuscator.decode(obfuscatedChapterJs)
+
+            val key = findHexEncodedVariable(deobfChapterJs, "key").decodeHex()
+            val iv = findHexEncodedVariable(deobfChapterJs, "iv").decodeHex()
+            val cipher = Cipher.getInstance(hashCipher)
+            val keyS = SecretKeySpec(key, aes)
+            cipher.init(Cipher.DECRYPT_MODE, keyS, IvParameterSpec(iv))
+
+            var imageList = cipher.doFinal(imgsrcs).toString(Charsets.UTF_8)
+            imageList = unescrambleImageList(imageList, deobfChapterJs)
+
+            val cols = colsRegex.find(deobfChapterJs)?.groupValues?.get(1) ?: ""
+
+            val batchImages = imageList.split(",")
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .map { url ->
+                    if (url.contains("cspiclink")) {
+                        "$url#desckey=${getDescramblingKey(deobfChapterJs, url)}&cols=$cols"
+                    } else {
+                        url
+                    }
+                }
+
+            if (batchImages.isEmpty()) break
+            allImages.addAll(batchImages)
+            batchStart += batchSize
+
+            if (batchStart > pagesCount + batchSize) break
+        }
+
+        return allImages.take(pagesCount).mapIndexed { index, imageUrl ->
+            Page(index, imageUrl = imageUrl)
+        }
     }
 
     private var cachedDeofChapterJS: String? = null
@@ -531,6 +606,21 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         return imgList
     }
 
+    // Persistent QuickJs instance to avoid creating a runtime on every descrambling key evaluation.
+    private val quickJs by lazy {
+        QuickJs.create().apply {
+            // Define replacePos once in the persistent runtime
+            evaluate(
+                """
+                function replacePos(strObj, pos, replacetext) {
+                    var str = strObj.substr(0, pos) + replacetext + strObj.substring(pos + 1, strObj.length);
+                    return str;
+                }
+                """.trimIndent(),
+            )
+        }
+    }
+
     private fun unscrambleImage(image: InputStream, key: String, cols: Int): ByteArray {
         val bitmap = BitmapFactory.decodeStream(image)
 
@@ -592,10 +682,15 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
             getDescramblingKey("$imageUrl");
         """.trimIndent()
 
-        return QuickJs.create().use {
-            it.execute(replacePosBytecode)
-
-            it.evaluate(js).toString()
+        // Use the persistent QuickJs runtime for faster evaluations; fall back to a temporary runtime if needed.
+        return try {
+            quickJs.evaluate(js).toString()
+        } catch (e: Exception) {
+            QuickJs.create().use {
+                // Execute the replacePos helper bytecode for fallback compatibility
+                it.execute(replacePosBytecode)
+                it.evaluate(js).toString()
+            }
         }
     }
 

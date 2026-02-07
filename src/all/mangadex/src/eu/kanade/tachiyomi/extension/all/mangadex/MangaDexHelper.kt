@@ -1,3 +1,5 @@
+@file:Suppress("ktlint:standard:kdoc")
+
 package eu.kanade.tachiyomi.extension.all.mangadex
 
 import android.text.Editable
@@ -108,18 +110,17 @@ class MangaDexHelper(lang: String) {
     /**
      * Get chapters for manga (aka manga/$id/feed endpoint)
      */
-    fun getChapterEndpoint(mangaId: String, offset: Int, langCode: String) =
-        "${MDConstants.apiMangaUrl}/$mangaId/feed".toHttpUrl().newBuilder()
-            .addQueryParameter("includes[]", MDConstants.scanlationGroup)
-            .addQueryParameter("includes[]", MDConstants.user)
-            .addQueryParameter("limit", "500")
-            .addQueryParameter("offset", offset.toString())
-            .addQueryParameter("translatedLanguage[]", langCode)
-            .addQueryParameter("order[volume]", "desc")
-            .addQueryParameter("order[chapter]", "desc")
-            .addQueryParameter("includeFuturePublishAt", "0")
-            .addQueryParameter("includeEmptyPages", "0")
-            .toString()
+    fun getChapterEndpoint(mangaId: String, offset: Int, langCode: String) = "${MDConstants.apiMangaUrl}/$mangaId/feed".toHttpUrl().newBuilder()
+        .addQueryParameter("includes[]", MDConstants.scanlationGroup)
+        .addQueryParameter("includes[]", MDConstants.user)
+        .addQueryParameter("limit", "500")
+        .addQueryParameter("offset", offset.toString())
+        .addQueryParameter("translatedLanguage[]", langCode)
+        .addQueryParameter("order[volume]", "desc")
+        .addQueryParameter("order[chapter]", "desc")
+        .addQueryParameter("includeFuturePublishAt", "0")
+        .addQueryParameter("includeEmptyPages", "0")
+        .toString()
 
     /**
      * Check if the manga url is a valid uuid
@@ -139,16 +140,13 @@ class MangaDexHelper(lang: String) {
     /**
      * Get the latest chapter offset pages are 1 based, so subtract 1
      */
-    fun getLatestChapterOffset(page: Int): String =
-        (MDConstants.latestChapterLimit * (page - 1)).toString()
+    fun getLatestChapterOffset(page: Int): String = (MDConstants.latestChapterLimit * (page - 1)).toString()
 
     /**
      * Remove any HTML characters in manga or chapter name to actual
      * characters. For example &hearts; will show ♥.
      */
-    private fun String.removeEntities(): String {
-        return Parser.unescapeEntities(this, false)
-    }
+    private fun String.removeEntities(): String = Parser.unescapeEntities(this, false)
 
     /**
      * Remove any HTML characters in description to actual characters.
@@ -184,8 +182,7 @@ class MangaDexHelper(lang: String) {
         }
     }
 
-    private fun parseDate(dateAsString: String): Long =
-        MDConstants.dateFormatter.parse(dateAsString)?.time ?: 0
+    private fun parseDate(dateAsString: String): Long = MDConstants.dateFormatter.parse(dateAsString)?.time ?: 0
 
     /**
      * Chapter URL where we get the token, last request time.
@@ -211,6 +208,7 @@ class MangaDexHelper(lang: String) {
         val mdAtHomeServerUrl =
             when (Date().time - time.toLong() > MDConstants.mdAtHomeTokenLifespan) {
                 false -> host
+
                 true -> {
                     val tokenLifespan = Date().time - (tokenTracker[tokenRequestUrl] ?: 0)
                     val cacheControl = if (tokenLifespan > MDConstants.mdAtHomeTokenLifespan) {
@@ -262,8 +260,7 @@ class MangaDexHelper(lang: String) {
         return GET(tokenRequestUrl, headers, cacheControl)
     }
 
-    private fun List<Map<String, String>>.findTitleByLang(lang: String): String? =
-        firstOrNull { it[lang] != null }?.values?.singleOrNull()
+    private fun List<Map<String, String>>.findTitleByLang(lang: String): String? = firstOrNull { it[lang] != null }?.values?.singleOrNull()
 
     /**
      * Create a [SManga] from the JSON element with only basic attributes filled.

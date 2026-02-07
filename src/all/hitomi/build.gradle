@@ -1,5 +1,5 @@
 ext {
-    kmkVersionCode = 1    
+    kmkVersionCode = 1
     extName = 'Hitomi'
     extClass = '.HitomiFactory'
     extVersionCode = 41

@@ -26,7 +26,9 @@ import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-class MangaPlanet : ConfigurableSource, ParsedHttpSource() {
+class MangaPlanet :
+    ParsedHttpSource(),
+    ConfigurableSource {
 
     override val name = "Manga Planet"
     override val baseUrl = "https://mangaplanet.com"
@@ -47,18 +49,16 @@ class MangaPlanet : ConfigurableSource, ParsedHttpSource() {
         .add("Referer", "$baseUrl/")
 
     // Helper to fetch JP title from manga's details page
-    private fun getJapaneseTitle(mangaUrl: String): String? {
-        return try {
-            val url = baseUrl + mangaUrl
-            val response = client.newCall(GET(url, headers)).execute()
-            val document = response.body?.let { org.jsoup.Jsoup.parse(it.string()) }
-            val alternativeTitlesElement = document?.selectFirst("h3#manga_title + p")
-            val alternativeTitles = alternativeTitlesElement?.textNodes()
-                ?.filterNot { it.isBlank() }.orEmpty()
-            alternativeTitles.getOrNull(1)?.text()?.trim()
-        } catch (_: Exception) {
-            null
-        }
+    private fun getJapaneseTitle(mangaUrl: String): String? = try {
+        val url = baseUrl + mangaUrl
+        val response = client.newCall(GET(url, headers)).execute()
+        val document = response.body?.let { org.jsoup.Jsoup.parse(it.string()) }
+        val alternativeTitlesElement = document?.selectFirst("h3#manga_title + p")
+        val alternativeTitles = alternativeTitlesElement?.textNodes()
+            ?.filterNot { it.isBlank() }.orEmpty()
+        alternativeTitles.getOrNull(1)?.text()?.trim()
+    } catch (_: Exception) {
+        null
     }
 
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/browse/title?ttlpage=$page", headers)

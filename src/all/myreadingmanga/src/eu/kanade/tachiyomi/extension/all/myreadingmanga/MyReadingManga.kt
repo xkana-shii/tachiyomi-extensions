@@ -34,15 +34,16 @@ import uy.kohesive.injekt.api.get
 import java.text.SimpleDateFormat
 import java.util.Locale
 
-open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) : ParsedHttpSource(), ConfigurableSource {
+open class MyReadingManga(override val lang: String, private val siteLang: String, private val latestLang: String) :
+    ParsedHttpSource(),
+    ConfigurableSource {
 
     // Basic Info
     override val name = "MyReadingManga"
     final override val baseUrl = "https://myreadingmanga.info"
-    override fun headersBuilder(): Headers.Builder =
-        super.headersBuilder()
-            .set("User-Agent", USER_AGENT)
-            .add("X-Requested-With", randomString((1..20).random()))
+    override fun headersBuilder(): Headers.Builder = super.headersBuilder()
+        .set("User-Agent", USER_AGENT)
+        .add("X-Requested-With", randomString((1..20).random()))
 
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     private val credentials: Credential get() = Credential(
@@ -242,36 +243,34 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             }
     }
 
-    private fun mangaDetailsParse(document: Document, needCover: Boolean = true): SManga {
-        return SManga.create().apply {
-            title = cleanTitle(document.select("h1").text())
-            author = cleanAuthor(document.select("h1").text())
-            artist = author
-            genre = document.select(".entry-header p a[href*=genre], [href*=tag], span.entry-categories a").joinToString { it.text() }
-            val basicDescription = document.select("h1").text()
-            // too troublesome to achieve 100% accuracy assigning scanlator group during chapterListParse
-            val scanlatedBy = document.select(".entry-terms:has(a[href*=group])").firstOrNull()
-                ?.select("a[href*=group]")?.joinToString(prefix = "Scanlated by: ") { it.text() }
-            val extendedDescription = document.select(".entry-content p:not(p:containsOwn(|)):not(.chapter-class + p)").joinToString("\n") { it.text() }
-            description = listOfNotNull(basicDescription, scanlatedBy, extendedDescription).joinToString("\n").trim()
-            status = when (document.select("a[href*=status]").first()?.text()) {
-                "Completed" -> SManga.COMPLETED
-                "Ongoing" -> SManga.ONGOING
-                "Licensed" -> SManga.LICENSED
-                "Dropped" -> SManga.CANCELLED
-                "Discontinued" -> SManga.CANCELLED
-                "Hiatus" -> SManga.ON_HIATUS
-                else -> SManga.UNKNOWN
-            }
+    private fun mangaDetailsParse(document: Document, needCover: Boolean = true): SManga = SManga.create().apply {
+        title = cleanTitle(document.select("h1").text())
+        author = cleanAuthor(document.select("h1").text())
+        artist = author
+        genre = document.select(".entry-header p a[href*=genre], [href*=tag], span.entry-categories a").joinToString { it.text() }
+        val basicDescription = document.select("h1").text()
+        // too troublesome to achieve 100% accuracy assigning scanlator group during chapterListParse
+        val scanlatedBy = document.select(".entry-terms:has(a[href*=group])").firstOrNull()
+            ?.select("a[href*=group]")?.joinToString(prefix = "Scanlated by: ") { it.text() }
+        val extendedDescription = document.select(".entry-content p:not(p:containsOwn(|)):not(.chapter-class + p)").joinToString("\n") { it.text() }
+        description = listOfNotNull(basicDescription, scanlatedBy, extendedDescription).joinToString("\n").trim()
+        status = when (document.select("a[href*=status]").first()?.text()) {
+            "Completed" -> SManga.COMPLETED
+            "Ongoing" -> SManga.ONGOING
+            "Licensed" -> SManga.LICENSED
+            "Dropped" -> SManga.CANCELLED
+            "Discontinued" -> SManga.CANCELLED
+            "Hiatus" -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
 
-            if (needCover) {
-                thumbnail_url = client.newCall(GET("$baseUrl/?s=${document.location()}", headers))
-                    .execute().use {
-                        it.asJsoup().select("div.ep-search-content div.entry-content img").firstOrNull()
-                    }?.let {
-                        getThumbnail(getImage(it))
-                    }
-            }
+        if (needCover) {
+            thumbnail_url = client.newCall(GET("$baseUrl/?s=${document.location()}", headers))
+                .execute().use {
+                    it.asJsoup().select("div.ep-search-content div.entry-content img").firstOrNull()
+                }?.let {
+                    getThumbnail(getImage(it))
+                }
         }
     }
 
@@ -302,9 +301,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return chapters
     }
 
-    private fun parseDate(date: String): Long {
-        return SimpleDateFormat("MMM dd, yyyy", Locale.US).parse(date)?.time ?: 0
-    }
+    private fun parseDate(date: String): Long = SimpleDateFormat("MMM dd, yyyy", Locale.US).parse(date)?.time ?: 0
 
     private fun createChapter(pageNumber: String, mangaUrl: String, date: Long, chname: String): SChapter {
         val chapter = SChapter.create()
@@ -318,12 +315,10 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Pages
 
-    override fun pageListParse(document: Document): List<Page> {
-        return (document.select("div.entry-content img") + document.select("div.separator img[data-src]"))
-            .mapNotNull { getImage(it) }
-            .distinct()
-            .mapIndexed { i, url -> Page(i, "", url) }
-    }
+    override fun pageListParse(document: Document): List<Page> = (document.select("div.entry-content img") + document.select("div.separator img[data-src]"))
+        .mapNotNull { getImage(it) }
+        .distinct()
+        .mapIndexed { i, url -> Page(i, "", url) }
 
     override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
 
@@ -368,21 +363,21 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     )
 
     // Generates the filter lists for app
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            EnforceLanguageFilter(siteLang),
-            SearchSortTypeList(),
-            GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
-            TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tag-groups-alphabetical-index a")),
-            CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".tag-groups-alphabetical-index a")),
-            PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".tag-groups-alphabetical-index a")),
-            ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".tag-groups-alphabetical-index a")),
-            // ArtistsFilter(returnFilter(cachedPagesUrls["artists"]!!, ".artists-list-alphabetical a")),
-            StatusFilter(),
-        )
-    }
+    override fun getFilterList(): FilterList = FilterList(
+        EnforceLanguageFilter(siteLang),
+        SearchSortTypeList(),
+        GenreFilter(returnFilter(cachedPagesUrls["genres"]!!, ".tagcloud a[href*=/genre/]")),
+        TagFilter(returnFilter(cachedPagesUrls["tags"]!!, ".tag-groups-alphabetical-index a")),
+        CatFilter(returnFilter(cachedPagesUrls["categories"]!!, ".tag-groups-alphabetical-index a")),
+        PairingFilter(returnFilter(cachedPagesUrls["pairings"]!!, ".tag-groups-alphabetical-index a")),
+        ScanGroupFilter(returnFilter(cachedPagesUrls["groups"]!!, ".tag-groups-alphabetical-index a")),
+        // ArtistsFilter(returnFilter(cachedPagesUrls["artists"]!!, ".artists-list-alphabetical a")),
+        StatusFilter(),
+    )
 
-    private class EnforceLanguageFilter(val siteLang: String) : Filter.CheckBox("Enforce language", true), UriFilter {
+    private class EnforceLanguageFilter(val siteLang: String) :
+        Filter.CheckBox("Enforce language", true),
+        UriFilter {
         fun indexModifier() = if (state) 0 else 1
         override fun addToUri(uri: Uri.Builder) {
             if (state) uri.appendQueryParameter("ep_filter_lang", siteLang)
@@ -409,8 +404,8 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val vals: Array<Pair<String, String>>,
         val firstIsUnspecified: Boolean = true,
         defaultValue: Int = 0,
-    ) :
-        Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), defaultValue), UriFilter {
+    ) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray(), defaultValue),
+        UriFilter {
         override fun addToUri(uri: Uri.Builder) {
             if (state != 0 || !firstIsUnspecified) {
                 uri.appendQueryParameter(uriParam, vals[state].second)

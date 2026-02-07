@@ -61,27 +61,7 @@ Once there, you can add repositories by inputting this URL:
 https://raw.githubusercontent.com/zosetsu-repo/tachi-repo/repo/index.min.json
 ```
 
-Once you've added a repository, go to Browse -> Extensions and refresh the extensions list.
-
-You can now tap the download button next to extensions to install them.
-
-> You may need to [enable third-party installations](https://komikku-app.github.io/docs/faq/browse/extensions#enabling-third-party-installations).
-
-## Others
-If you're not using any of the above fork then manually download and update extensions from the [listing page](https://zosetsu-repo.github.io/extensions/)
-
-
-# Usage
-
-[Getting started](https://zosetsu-repo.github.io/docs/guides/getting-started#adding-the-extension-repo)
-
-Extension sources can be downloaded, installed, and uninstalled via the main Komikku app. They are installed and uninstalled like regular apps, in `.apk` format.
-
-## Downloads
-
-If you prefer to directly download the APK files, they are available via https://zosetsu-repo.github.io/extensions/ or directly in this GitHub repository in the [`repo` branch](https://github.com/zosetsu-repo/tachi-repo/tree/repo/apk).
-
-# Requests
+## Requests
 
 To request a new source or bug fix, [create an issue](https://github.com/zosetsu-repo/tachiyomi-extensions/issues/new/choose).
 
@@ -92,7 +72,7 @@ difficult to maintain.
 If you would like to see a request fulfilled and have the necessary skills to do so, consider contributing!
 Issues are up-for-grabs for any developer if there is no assigned user already.
 
-# Contributing
+## Contributing
 
 Contributions are welcome!
 

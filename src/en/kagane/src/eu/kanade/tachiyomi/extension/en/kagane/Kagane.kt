@@ -8,14 +8,10 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import android.view.View
-import android.view.ViewGroup
-import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.MultiSelectListPreference
@@ -26,7 +22,6 @@ import eu.kanade.tachiyomi.extension.en.kagane.wv.ProtectionSystemHeaderBox
 import eu.kanade.tachiyomi.extension.en.kagane.wv.parsePssh
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.await
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -39,12 +34,12 @@ import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.CacheControl
-import okhttp3.Call
-import okhttp3.Callback
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -52,7 +47,6 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.brotli.BrotliInterceptor
-import okhttp3.internal.closeQuietly
 import okio.IOException
 import rx.Observable
 import uy.kohesive.injekt.Injekt
@@ -80,7 +74,6 @@ class Kagane :
     private val preferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
-//        .addInterceptor(ImageInterceptor())
         .addInterceptor(::refreshTokenInterceptor)
         // fix disk cache
         .apply {
@@ -89,29 +82,6 @@ class Kagane :
         }
         .build()
 
-    val genres by lazy {
-        client.newCall(GET("$apiUrl/api/v2/genres/list")).execute().parseAs<List<GenreDto>>().associate { it.id to it.genreName }
-    }
-
-    val tags by lazy {
-        client.newCall(GET("$apiUrl/api/v2/tags/list")).execute().parseAs<List<TagDto>>().associate { it.id to it.tagName }
-    }
-    val sourcesInfo by lazy {
-        client.newCall(
-            POST(
-                "$apiUrl/api/v2/sources/list",
-                body = buildJsonObject { put("source_types", null) }.toJsonString().toRequestBody("application/json".toMediaType()),
-            ),
-        ).execute().parseAs<SourcesDto>().sources.associate { it.sourceId to (it.title to it.sourceType) }
-    }
-
-    val sources by lazy {
-        sourcesInfo.map { (k, v) -> k to v.first }.toMap()
-    }
-    val officialSources by lazy {
-        sourcesInfo.filter { it.value.second == "Official" }.toMap()
-    }
-
     private fun refreshTokenInterceptor(chain: Interceptor.Chain): Response {
         val request = chain.request()
         val url = request.url
@@ -119,7 +89,7 @@ class Kagane :
             return chain.proceed(request)
         }
 
-        val chapterId = url.pathSegments[5]
+        val chapterId = url.pathSegments[4]
 
         var response = chain.proceed(
             request.newBuilder()
@@ -191,12 +161,48 @@ class Kagane :
                         filter.addToJsonObject(this, "genres", preferences.excludedGenres.toList())
                     }
 
-                    is TagsFilter -> {
-                        filter.addToJsonObject(this, "genres")
+                    is TagsSearchFilter -> {
+                        val rawInput = filter.state.trim()
+                        if (rawInput.isNotBlank()) {
+                            val metadata = metadata
+                            if (metadata != null) {
+                                val tagEntries = rawInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+                                val includeIds = mutableListOf<String>()
+                                val excludeIds = mutableListOf<String>()
+
+                                tagEntries.forEach { entry ->
+                                    val isExclude = entry.startsWith("-")
+                                    val tagName = if (isExclude) entry.removePrefix("-").trim() else entry
+                                    val tagId = metadata.tags.entries.firstOrNull {
+                                        it.value.equals(tagName, ignoreCase = true)
+                                    }?.key
+                                    if (tagId != null) {
+                                        if (isExclude) excludeIds.add(tagId) else includeIds.add(tagId)
+                                    }
+                                }
+
+                                if (includeIds.isNotEmpty() || excludeIds.isNotEmpty()) {
+                                    putJsonObject("tags") {
+                                        put("match_all", false)
+                                        if (includeIds.isNotEmpty()) {
+                                            putJsonArray("values") {
+                                                includeIds.forEach { add(it) }
+                                            }
+                                        }
+                                        if (excludeIds.isNotEmpty()) {
+                                            putJsonArray("exclude") {
+                                                excludeIds.forEach { add(it) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     is SourcesFilter -> {
-                        filter.addToJsonObject(this, "source_id")
+                        filter.addToJsonObject(this, "")
                     }
 
                     is JsonFilter -> {
@@ -236,31 +242,26 @@ class Kagane :
 
     override fun searchMangaParse(response: Response): MangasPage {
         val dto = response.parseAs<SearchDto>()
-        val mangas = dto.content.filter {
-            if (!preferences.showDuplicates) {
-                val alternateSeries = client.newCall(GET("$apiUrl/api/v2/alternate_series/${it.id}", apiHeaders))
-                    .execute()
-                    .parseAs<List<AlternateSeries>>()
+        val sources = try {
+            val sourceResponse = metadataClient.newCall(
+                POST(
+                    "$apiUrl/api/v2/sources/list",
+                    apiHeaders,
+                    buildJsonObject { put("source_types", null) }.toJsonString()
+                        .toRequestBody("application/json".toMediaType()),
+                ),
+            ).execute()
 
-                if (alternateSeries.isEmpty()) return@filter true
-
-                val startYear = it.startYear ?: 0
-                for (alt in alternateSeries) {
-                    val altYear = alt.startYear ?: 0
-
-                    when {
-                        it.booksCount < alt.booksCount -> return@filter false
-
-                        it.booksCount == alt.booksCount -> {
-                            if (startYear < altYear) return@filter false
-                        }
-                    }
-                }
-                true
+            if (sourceResponse.isSuccessful) {
+                sourceResponse.parseAs<SourcesDto>().sources.associate { it.sourceId to it.title }
             } else {
-                true
+                emptyMap()
             }
-        }.map { it.toSManga(apiUrl, preferences.showSource, sources) }
+        } catch (e: Exception) {
+            Log.w(name, "Failed to load sources", e)
+            emptyMap()
+        }
+        val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources) }
         return MangasPage(mangas, hasNextPage = dto.hasNextPage())
     }
 
@@ -293,10 +294,7 @@ class Kagane :
         )
 
         return dto.seriesBooks.map { book ->
-            book.toSChapter(useSourceChapterNumber).apply {
-                // Fix the URL to include the actual seriesId
-                url = "/series/$seriesId/reader/${book.id}"
-            }
+            book.toSChapter(seriesId, useSourceChapterNumber, preferences.chapterTitleMode)
         }.reversed()
     }
 
@@ -318,11 +316,13 @@ class Kagane :
     private val fairPlayCertificate by lazy { getCertificate("$apiUrl/api/v2/static/crt.crt") }
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
+        if (chapter.url.contains(";")) {
+            throw Exception("Outdated chapter URL. Please refresh the chapter list")
+        }
+
         val chapterId = "$baseUrl${chapter.url}".toHttpUrl().pathSegments.last()
         val challengeResp = getChallengeResponse(chapterId)
-        Log.d("challenge", challengeResp.accessToken)
-        Log.d("challenge", "${challengeResp.pages.map { page -> page.pageUuid }}")
-        Log.d("challenge", challengeResp.cacheUrl)
+
         accessToken = challengeResp.accessToken
         cacheUrl = challengeResp.cacheUrl
 
@@ -349,7 +349,7 @@ class Kagane :
 
     private fun getIntegrityToken(): String {
         if (integrityExp < System.currentTimeMillis()) {
-            val res = metadataClient.newCall(
+            val res = client.newCall(
                 POST(
                     "https://kagane.org/api/integrity",
                     headers,
@@ -365,18 +365,6 @@ class Kagane :
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun getChallengeResponse(chapterId: String): ChallengeDto {
-        if (preferences.drm_proxy_server.isNotBlank()) {
-            val proxyUrl = preferences.drm_proxy_server.toHttpUrl().newBuilder()
-                .addPathSegment("drm")
-                .addQueryParameter("cid", chapterId)
-                .addQueryParameter("ds", preferences.dataSaver.toString())
-                .build()
-            Log.d("here", "$proxyUrl")
-            val challenge = client.newCall(GET(proxyUrl)).execute()
-            Log.d("there", "${challenge.body}")
-            return challenge.parseAs<ChallengeDto>()
-        }
-
         val integrityToken = getIntegrityToken()
         val f = ":$chapterId".sha256().sliceArray(0 until 16)
 
@@ -597,23 +585,21 @@ class Kagane :
     private val SharedPreferences.showSource: Boolean
         get() = this.getBoolean(SHOW_SOURCE, SHOW_SOURCE_DEFAULT)
 
-    private val SharedPreferences.showDuplicates: Boolean
-        get() = this.getBoolean(SHOW_DUPLICATES, SHOW_DUPLICATES_DEFAULT)
-
     private val SharedPreferences.dataSaver
         get() = this.getBoolean(DATA_SAVER, false)
 
-    private val SharedPreferences.drm_proxy_server
-        get() = this.getString(DRM_PROXY_SERVER, PROXY_DEFAULT)!!
-
     private val SharedPreferences.wvd
         get() = this.getString(WVD_KEY, WVD_DEFAULT)!!
+
+    private val SharedPreferences.chapterTitleMode
+        get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = CONTENT_RATING
             title = "Content Rating"
-            entries = CONTENT_RATINGS.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
+            entries =
+                CONTENT_RATINGS.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
             entryValues = CONTENT_RATINGS
             summary = "%s"
             setDefaultValue(CONTENT_RATING_DEFAULT)
@@ -624,7 +610,8 @@ class Kagane :
             title = "Exclude Genres"
             entries = GenresList.map { it.replaceFirstChar { c -> c.uppercase() } }.toTypedArray()
             entryValues = GenresList
-            summary = preferences.excludedGenres.joinToString { it.replaceFirstChar { c -> c.uppercase() } }
+            summary =
+                preferences.excludedGenres.joinToString { it.replaceFirstChar { c -> c.uppercase() } }
             setDefaultValue(emptySet<String>())
 
             setOnPreferenceChangeListener { _, values ->
@@ -641,13 +628,6 @@ class Kagane :
         }.let(screen::addPreference)
 
         SwitchPreferenceCompat(screen.context).apply {
-            key = SHOW_DUPLICATES
-            title = "Show duplicates"
-            summary = "Show duplicate entries.\nPicks the entry with most chapters if disabled\nThis switch isn't always accurate\nNOTE: Enabling this option will slow your search speed down"
-            setDefaultValue(SHOW_DUPLICATES_DEFAULT)
-        }.let(screen::addPreference)
-
-        SwitchPreferenceCompat(screen.context).apply {
             key = SHOW_SOURCE
             title = "Show source name"
             summary = "Show source name in title"
@@ -661,16 +641,19 @@ class Kagane :
         }.let(screen::addPreference)
 
         EditTextPreference(screen.context).apply {
-            key = DRM_PROXY_SERVER
-            title = "DRM proxy server url"
-            setDefaultValue(PROXY_DEFAULT)
-        }.let(screen::addPreference)
-
-        EditTextPreference(screen.context).apply {
             key = WVD_KEY
             title = "WVD file"
             summary = "Enter contents as base64 string"
             setDefaultValue(WVD_DEFAULT)
+        }.let(screen::addPreference)
+
+        ListPreference(screen.context).apply {
+            key = CHAPTER_TITLE_MODE
+            title = "Chapter title format"
+            entries = CHAPTER_TITLE_MODE_NAMES
+            entryValues = CHAPTER_TITLE_MODES
+            summary = "%s"
+            setDefaultValue(CHAPTER_TITLE_MODE_DEFAULT)
         }.let(screen::addPreference)
     }
 
@@ -693,21 +676,28 @@ class Kagane :
         private const val SHOW_SOURCE = "pref_show_source"
         private const val SHOW_SOURCE_DEFAULT = false
 
-        private const val SHOW_DUPLICATES = "pref_show_duplicates"
-        private const val SHOW_DUPLICATES_DEFAULT = true
-
         private const val DATA_SAVER = "data_saver_default"
 
         private const val WVD_KEY = "wvd_key"
         private const val WVD_DEFAULT = ""
 
-        private const val DRM_PROXY_SERVER = "drm_proxy_server"
-
-        private const val PROXY_DEFAULT = ""
+        private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
+        private const val CHAPTER_TITLE_MODE_DEFAULT = "smart"
+        internal val CHAPTER_TITLE_MODES = arrayOf(
+            "smart",
+            "always",
+            "never",
+        )
+        internal val CHAPTER_TITLE_MODE_NAMES = arrayOf(
+            "Smart (Default)",
+            "Always show chapter number",
+            "Never show chapter number",
+        )
     }
 
     // ============================= Filters ==============================
 
+    private var metadata: MetadataDto? = null
     private val metadataClient = client.newBuilder()
         .addNetworkInterceptor { chain ->
             chain.proceed(chain.request()).newBuilder()
@@ -717,29 +707,75 @@ class Kagane :
                 .build()
         }.build()
 
-    override fun getFilterList(): FilterList = runBlocking(Dispatchers.IO) {
+    override fun getFilterList(): FilterList {
         val filters: MutableList<Filter<*>> = mutableListOf(
             SortFilter(),
             ContentRatingFilter(
                 preferences.contentRating.toSet(),
             ),
-            // GenresFilter(),
-            // TagsFilter(),
-            // SourcesFilter(),
             Filter.Separator(),
         )
 
-        val metadata = MetadataDto(genres, tags, sources)
+        fetchMetadata()
 
-        filters.addAll(
-            index = 2,
-            listOf(
-                GenresFilter(metadata.getGenresList()),
-                TagsFilter(metadata.getTagsList()),
-                SourcesFilter(metadata.getSourcesList().filter { !(!preferences.showScanlations && !officialSources.contains(it.name.lowercase())) }),
-            ),
-        )
+        val meta = metadata
 
-        FilterList(filters)
+        if (meta != null) {
+            filters.addAll(
+                listOf(
+                    GenresFilter(meta.getGenresList()),
+                    TagsSearchFilter(),
+                    SourcesFilter(
+                        meta.getSourcesList().filter {
+                            !(!preferences.showScanlations && !isOfficialSource(it.id, meta))
+                        },
+                    ),
+                ),
+            )
+        } else {
+            filters.add(0, Filter.Header("Press 'Reset' to load more filters"))
+            filters.add(1, Filter.Separator())
+        }
+
+        return FilterList(filters)
+    }
+
+    private fun isOfficialSource(sourceId: String, metadata: MetadataDto): Boolean {
+        val sourceName = metadata.sources[sourceId]?.lowercase() ?: return false
+        return officialSources.any { sourceName.contains(it) }
+    }
+
+    private fun fetchMetadata() {
+        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val genreResponse = metadataClient.newCall(
+                    GET("$apiUrl/api/v2/genres/list", apiHeaders),
+                ).execute()
+                val tagsResponse = metadataClient.newCall(
+                    GET("$apiUrl/api/v2/tags/list", apiHeaders),
+                ).execute()
+                val sourcesResponse = metadataClient.newCall(
+                    POST(
+                        "$apiUrl/api/v2/sources/list",
+                        apiHeaders,
+                        buildJsonObject { put("source_types", null) }.toJsonString()
+                            .toRequestBody("application/json".toMediaType()),
+                    ),
+                ).execute()
+
+                if (genreResponse.isSuccessful && tagsResponse.isSuccessful && sourcesResponse.isSuccessful) {
+                    val genres = genreResponse.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
+                    val tags = tagsResponse.parseAs<List<TagDto>>().associate { it.id to it.tagName }
+                    val sources = sourcesResponse.parseAs<SourcesDto>().sources.associate { it.sourceId to it.title }
+
+                    metadata = MetadataDto(genres, tags, sources)
+                    Log.d(name, "Metadata fetched and updated")
+                } else {
+                    Log.e(name, "Failed to fetch metadata: One or more requests failed")
+                }
+            } catch (e: Exception) {
+                Log.e(name, "Failed to fetch metadata", e)
+            }
+        }
     }
 }

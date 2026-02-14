@@ -142,14 +142,18 @@ class DetailsDto(
             }
         }
 
-        // Extract authors from staff (roles like "Author", "Artist", "Story", "Art")
+        // Extract authors and artists from staff (roles like "Author", "Artist", "Story", "Art")
         val authors = seriesStaff.filter {
-            it.role.contains("Author", ignoreCase = true) ||
-                it.role.contains("Story", ignoreCase = true) ||
-                it.role.contains("Art", ignoreCase = true) ||
-                it.role.contains("Artist", ignoreCase = true)
+            it.role.contains("Author", ignoreCase = true) || it.role.contains("Story", ignoreCase = true)
         }.map { it.name }.distinct()
+        val artists = seriesStaff.filter {
+            it.role.contains("Artist", ignoreCase = true) || it.role.contains("Art", ignoreCase = true)
+        }
+            .map { it.name }
+            .distinct()
+            .joinToString(", ")
 
+        artist = artists
         author = authors.joinToString()
         description = desc.toString().trim()
         genre = genres.joinToString { it.genreName }
@@ -187,29 +191,73 @@ class ChapterDto(
         val chapterNo: String?,
         @SerialName("volume_no")
         val volumeNo: String?,
+        val groups: List<Group> = emptyList(),
     ) {
-        fun toSChapter(useSourceChapterNumber: Boolean = false): SChapter = SChapter.create().apply {
-            // series_id might be null in the books endpoint, so we extract it from the request URL later
-            val actualSeriesId = seriesId ?: "unknown"
-            url = "$actualSeriesId;$id;$pagesCount"
-            name = buildChapterName()
+        fun toSChapter(actualSeriesId: String, useSourceChapterNumber: Boolean = false, chapterTitleMode: String = "smart"): SChapter = SChapter.create().apply {
+            url = "/series/$actualSeriesId/reader/$id"
+            name = buildChapterName(chapterTitleMode)
             date_upload = dateFormat.tryParse(createdAt)
             if (useSourceChapterNumber) {
                 chapter_number = number
             }
+            scanlator = groups.joinToString(", ") { it.title }
         }
 
-        private fun buildChapterName(): String = if (!chapterNo.isNullOrBlank()) {
-            if (title.isNotBlank()) {
-                "Chapter $chapterNo: $title"
-            } else {
-                "Chapter $chapterNo"
+        private fun buildChapterName(mode: String = "smart"): String {
+            val trimmedTitle = title.trim()
+            return when (mode) {
+                "never" -> {
+                    trimmedTitle
+                }
+
+                "always" -> {
+                    when {
+                        chapterNo.isNullOrBlank() -> trimmedTitle
+                        trimmedTitle.isEmpty() -> "Chapter $chapterNo"
+                        else -> "Chapter $chapterNo: $trimmedTitle"
+                    }
+                }
+
+                else -> {
+                    when {
+                        chapterNo.isNullOrBlank() -> trimmedTitle
+
+                        trimmedTitle.isEmpty() -> "Chapter $chapterNo"
+
+                        trimmedTitle.matches(
+                            Regex(
+                                "^\\(S\\d+\\)\\s*(Chapter|Episode|Ch|Ep).*",
+                                RegexOption.IGNORE_CASE,
+                            ),
+                        ) -> trimmedTitle
+
+                        trimmedTitle.matches(
+                            Regex(
+                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*${Regex.escape(chapterNo)}[\\s\\-:.].*",
+                                RegexOption.IGNORE_CASE,
+                            ),
+                        ) -> trimmedTitle
+
+                        trimmedTitle.matches(
+                            Regex(
+                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*\\d+.*",
+                                RegexOption.IGNORE_CASE,
+                            ),
+                        ) -> trimmedTitle
+
+                        trimmedTitle.matches(Regex("^\\d+[\\s\\-:.].*")) -> trimmedTitle
+
+                        else -> "Chapter $chapterNo: $trimmedTitle"
+                    }
+                }
             }
-        } else {
-            title
         }
     }
 
+    @Serializable
+    class Group(
+        val title: String,
+    )
     companion object {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)
     }

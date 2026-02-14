@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
 import android.content.SharedPreferences
-import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getArtists
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getGroups
@@ -39,7 +38,8 @@ import uy.kohesive.injekt.injectLazy
 open class NHentai(
     override val lang: String,
     private val nhLang: String,
-) : ConfigurableSource, ParsedHttpSource() {
+) : ParsedHttpSource(),
+    ConfigurableSource {
 
     final override val baseUrl = "https://nhentai.net"
 
@@ -64,34 +64,12 @@ open class NHentai(
             .build()
     }
 
-    private var displayFullTitle: Boolean = when (preferences.getString(TITLE_PREF, "full")) {
-        "full" -> true
-        else -> false
-    }
-
     private val shortenTitleRegex = Regex("""(\[[^]]*]|[({][^)}]*[)}])""")
     private val dataRegex = Regex("""JSON\.parse\(\s*"(.*)"\s*\)""")
     private val hentaiSelector = "script:containsData(JSON.parse):not(:containsData(media_server)):not(:containsData(avatar_url))"
     private fun String.shortenTitle() = this.replace(shortenTitleRegex, "").trim()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        ListPreference(screen.context).apply {
-            key = TITLE_PREF
-            title = TITLE_PREF
-            entries = arrayOf("Full Title", "Short Title")
-            entryValues = arrayOf("full", "short")
-            summary = "%s"
-            setDefaultValue("full")
-
-            setOnPreferenceChangeListener { _, newValue ->
-                displayFullTitle = when (newValue) {
-                    "full" -> true
-                    else -> false
-                }
-                true
-            }
-        }.also(screen::addPreference)
-
         addRandomUAPreferenceToScreen(screen)
     }
 
@@ -101,9 +79,7 @@ open class NHentai(
 
     override fun latestUpdatesFromElement(element: Element) = SManga.create().apply {
         setUrlWithoutDomain(element.select("a").attr("href"))
-        title = element.select("a > div").text().replace("\"", "").let {
-            if (displayFullTitle) it.trim() else it.shortenTitle()
-        }
+        title = element.select("a > div").text().replace("\"", "").shortenTitle()
         thumbnail_url = element.selectFirst(".cover img")!!.let { img ->
             if (img.hasAttr("data-src")) img.attr("abs:data-src") else img.attr("abs:src")
         }
@@ -119,21 +95,21 @@ open class NHentai(
 
     override fun popularMangaNextPageSelector() = latestUpdatesNextPageSelector()
 
-    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> {
-        return when {
-            query.startsWith(PREFIX_ID_SEARCH) -> {
-                val id = query.removePrefix(PREFIX_ID_SEARCH)
-                client.newCall(searchMangaByIdRequest(id))
-                    .asObservableSuccess()
-                    .map { response -> searchMangaByIdParse(response, id) }
-            }
-            query.toIntOrNull() != null -> {
-                client.newCall(searchMangaByIdRequest(query))
-                    .asObservableSuccess()
-                    .map { response -> searchMangaByIdParse(response, query) }
-            }
-            else -> super.fetchSearchManga(page, query, filters)
+    override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
+        query.startsWith(PREFIX_ID_SEARCH) -> {
+            val id = query.removePrefix(PREFIX_ID_SEARCH)
+            client.newCall(searchMangaByIdRequest(id))
+                .asObservableSuccess()
+                .map { response -> searchMangaByIdParse(response, id) }
         }
+
+        query.toIntOrNull() != null -> {
+            client.newCall(searchMangaByIdRequest(query))
+                .asObservableSuccess()
+                .map { response -> searchMangaByIdParse(response, query) }
+        }
+
+        else -> super.fetchSearchManga(page, query, filters)
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
@@ -211,7 +187,7 @@ open class NHentai(
         val data = document.getHentaiData()
         val cdnUrl = document.getCdnUrls(thumbnail = true).random()
         return SManga.create().apply {
-            title = if (displayFullTitle) data.title.english ?: data.title.japanese ?: data.title.pretty!! else data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
+            title = data.title.pretty ?: (data.title.english ?: data.title.japanese)!!.shortenTitle()
             thumbnail_url = "https://$cdnUrl/galleries/${data.media_id}/1t.${data.images.pages[0].extension}"
             status = SManga.COMPLETED
             artist = getArtists(data)
@@ -235,7 +211,7 @@ open class NHentai(
         val data = response.asJsoup().getHentaiData()
         return listOf(
             SChapter.create().apply {
-                name = "Chapter"
+                name = "Chapter 1"
                 scanlator = getGroups(data)
                 date_upload = data.upload_date * 1000
                 setUrlWithoutDomain(response.request.url.encodedPath)
@@ -317,16 +293,17 @@ open class NHentai(
 
     private class FavoriteFilter : Filter.CheckBox("Show favorites only", false)
 
-    private class SortFilter : UriPartFilter(
-        "Sort By",
-        arrayOf(
-            Pair("Popular: All Time", "popular"),
-            Pair("Popular: Month", "popular-month"),
-            Pair("Popular: Week", "popular-week"),
-            Pair("Popular: Today", "popular-today"),
-            Pair("Recent", "date"),
-        ),
-    )
+    private class SortFilter :
+        UriPartFilter(
+            "Sort By",
+            arrayOf(
+                Pair("Popular: All Time", "popular"),
+                Pair("Popular: Month", "popular-month"),
+                Pair("Popular: Week", "popular-week"),
+                Pair("Popular: Today", "popular-today"),
+                Pair("Recent", "date"),
+            ),
+        )
 
     private inline fun <reified T> String.parseAs(): T {
         val data = Regex("""\\u([0-9A-Fa-f]{4})""").replace(this) {
@@ -336,8 +313,7 @@ open class NHentai(
             data,
         )
     }
-    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>) :
-        Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray()) {
+    private open class UriPartFilter(displayName: String, val vals: Array<Pair<String, String>>) : Filter.Select<String>(displayName, vals.map { it.first }.toTypedArray()) {
         fun toUriPart() = vals[state].second
     }
 
@@ -345,6 +321,5 @@ open class NHentai(
 
     companion object {
         const val PREFIX_ID_SEARCH = "id:"
-        private const val TITLE_PREF = "Display manga title as:"
     }
 }

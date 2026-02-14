@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.util.Base64
+import androidx.preference.EditTextPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import app.cash.quickjs.QuickJs
@@ -40,7 +41,9 @@ import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-class Mangago : ParsedHttpSource(), ConfigurableSource {
+class Mangago :
+    ParsedHttpSource(),
+    ConfigurableSource {
 
     override val name = "Mangago"
 
@@ -53,7 +56,6 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
-        .rateLimit(1, 2)
         .setRandomUserAgent(
             preferences.getPrefUAType(),
             preferences.getPrefCustomUA(),
@@ -104,8 +106,7 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         thumbnail_url = thumbnailElem.attr("abs:data-src").ifBlank { thumbnailElem.attr("abs:src") }
     }
 
-    override fun popularMangaRequest(page: Int): Request =
-        GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=view&e=", headers)
+    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=view&e=", headers)
 
     override fun popularMangaSelector(): String = genreListingSelector
 
@@ -113,8 +114,7 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
     override fun popularMangaNextPageSelector() = genreListingNextPageSelector
 
-    override fun latestUpdatesRequest(page: Int) =
-        GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=update_date&e=", headers)
+    override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=update_date&e=", headers)
 
     override fun latestUpdatesSelector() = genreListingSelector
 
@@ -136,6 +136,7 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
                 filters.ifEmpty { getFilterList() }.forEach {
                     when (it) {
                         is UriFilter -> it.addToUrl(this)
+
                         is GenreFilterGroup -> it.state.forEach { genre ->
                             when (genre.state) {
                                 Filter.TriState.STATE_EXCLUDE -> genresEx.add(genre.name)
@@ -143,6 +144,7 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
                                 else -> {}
                             }
                         }
+
                         else -> {}
                     }
                 }
@@ -167,36 +169,95 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
     override fun searchMangaNextPageSelector() = genreListingNextPageSelector
 
     private var titleRegex: Regex =
-        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|\\/Official|\\/ Official", RegexOption.IGNORE_CASE)
+        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
-        title = document.selectFirst(".w-title h1")!!.text()
-        if (isRemoveTitleVersion()) {
-            title = title.replace(titleRegex, "").trim()
-        }
-
+        val originalTitle = document.selectFirst(".w-title h1")!!.text()
+        val cleanedTitle = originalTitle
+            .replace(Regex(customRemoveTitle()), "")
+            .replace(if (isRemoveTitleVersion()) titleRegex else Regex(""), "")
+            .trim()
+        title = cleanedTitle
         document.getElementById("information")!!.let {
             thumbnail_url = it.selectFirst("img")!!.attr("abs:src")
+            var alternativeTitles = ""
             description = it.selectFirst(".manga_summary")?.let { summary ->
                 summary.selectFirst("font")?.remove()
                 summary.text()
             }
             it.select(".manga_info li, .manga_right tr").forEach { el ->
                 when (el.selectFirst("b, label")!!.text().lowercase()) {
-                    "alternative:" -> description += "\n\n${el.text()}"
+                    "alternative:" -> alternativeTitles = el.text().substringAfter(":").trim()
+
                     "status:" -> status = when (el.selectFirst("span")!!.text().lowercase()) {
                         "ongoing" -> SManga.ONGOING
                         "completed" -> SManga.COMPLETED
                         else -> SManga.UNKNOWN
                     }
+
                     "author(s):", "author:" -> author = el.select("a").joinToString { it.text() }
+
                     "genre(s):" -> genre = el.select("a").joinToString { it.text() }
                 }
             }
+
+            description = buildString {
+                append(description)
+                val names = alternativeTitles.takeUnless { it.isBlank() || it.trim().equals("none", ignoreCase = true) || it.trim().equals("N/A", ignoreCase = true) }?.let {
+                    var semicolonSeparated = it.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
+                    if (semicolonSeparated.contains(';')) {
+                        semicolonSeparated = semicolonSeparated.replace(Regex(";\\s*$"), "")
+                        semicolonSeparated.split(Regex("\\s*;\\s*"))
+                    } else {
+                        val commaSeparated = it.replace(Regex(",\\s*$"), "")
+                        commaSeparated.split(Regex("\\s*,\\s*"))
+                    }
+                }
+                    ?.map { it.trim() }
+                    ?.filter { it.isNotEmpty() }
+                    ?.joinToString("\n- ", prefix = "- ")
+
+                if (!names.isNullOrEmpty()) {
+                    append("\n\n----\n#### **Alternative Titles**\n", names)
+                }
+                val matches = mutableListOf<String>()
+
+                val tempTitle = if (isRemoveTitleVersion()) {
+                    var shortName = originalTitle
+                    while (titleRegex.containsMatchIn(shortName)) {
+                        val match = titleRegex.find(shortName)!!
+                        matches.add(match.value)
+                        shortName = shortName.replace(match.value, "").trim()
+                    }
+                    shortName
+                } else {
+                    originalTitle
+                }
+
+                if (customRemoveTitle().isNotEmpty()) {
+                    val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
+                    customRegex.findAll(tempTitle).forEach { matchResult ->
+                        matches.add(matchResult.value)
+                    }
+                }
+
+                matches.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
+
+                if (matches.isNotEmpty()) {
+                    append("\n\n----\n#### **Removed from title**\n")
+                    matches.forEach { match ->
+                        append("- `$match`\n")
+                    }
+                }
+            }.trim()
         }
     }
 
-    override fun chapterListSelector() = "table#chapter_table > tbody > tr, table.uk-table > tbody > tr"
+    override fun chapterListSelector(): String = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
+        "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
+    } else {
+        "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
+    }
 
     override fun chapterFromElement(element: Element) = SChapter.create().apply {
         val link = element.select("a.chico")
@@ -317,13 +378,11 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
     override fun relatedMangaListSelector() = ".also_like + div .listitem, .also-like li"
 
-    override fun relatedMangaFromElement(element: Element): SManga {
-        return element.selectFirst("a[title]")!!.let {
-            SManga.create().apply {
-                title = it.attr("title")
-                setUrlWithoutDomain(it.absUrl("href"))
-                thumbnail_url = element.selectFirst("img")!!.imgAttr()
-            }
+    override fun relatedMangaFromElement(element: Element): SManga = element.selectFirst("a[title]")!!.let {
+        SManga.create().apply {
+            title = it.attr("title")
+            setUrlWithoutDomain(it.absUrl("href"))
+            thumbnail_url = element.selectFirst("img")!!.imgAttr()
         }
     }
 
@@ -338,19 +397,23 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         fun addToUrl(builder: HttpUrl.Builder)
     }
 
-    private class StatusFilter(name: String, val query: String, state: Boolean) : UriFilter, Filter.CheckBox(name, state) {
+    private class StatusFilter(name: String, val query: String, state: Boolean) :
+        Filter.CheckBox(name, state),
+        UriFilter {
         override fun addToUrl(builder: HttpUrl.Builder) {
             builder.addQueryParameter(query, if (state) "1" else "0")
         }
     }
 
-    private class StatusFilterGroup : UriFilter, Filter.Group<StatusFilter>(
-        "Status",
-        listOf(
-            StatusFilter("Completed", "f", true),
-            StatusFilter("Ongoing", "o", true),
+    private class StatusFilterGroup :
+        Filter.Group<StatusFilter>(
+            "Status",
+            listOf(
+                StatusFilter("Completed", "f", true),
+                StatusFilter("Ongoing", "o", true),
+            ),
         ),
-    ) {
+        UriFilter {
         override fun addToUrl(builder: HttpUrl.Builder) {
             state.forEach {
                 it.addToUrl(builder)
@@ -364,7 +427,8 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         private val vals: Array<Pair<String, String>>,
         private val firstIsUnspecified: Boolean = true,
         state: Int = 0,
-    ) : UriFilter, Filter.Select<String>(name, vals.map { it.first }.toTypedArray(), state) {
+    ) : Filter.Select<String>(name, vals.map { it.first }.toTypedArray(), state),
+        UriFilter {
         override fun addToUrl(builder: HttpUrl.Builder) {
             if (state != 0 || !firstIsUnspecified) {
                 builder.addQueryParameter(query, vals[state].second)
@@ -372,63 +436,65 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         }
     }
 
-    private class SortFilter : UriPartFilter(
-        "Sort",
-        "sortby",
-        arrayOf(
-            Pair("Random", "random"),
-            Pair("Views", "view"),
-            Pair("Comment Count", "comment_count"),
-            Pair("Creation Date", "create_date"),
-            Pair("Update Date", "update_date"),
-        ),
-        state = 1,
-    )
+    private class SortFilter :
+        UriPartFilter(
+            "Sort",
+            "sortby",
+            arrayOf(
+                Pair("Random", "random"),
+                Pair("Views", "view"),
+                Pair("Comment Count", "comment_count"),
+                Pair("Creation Date", "create_date"),
+                Pair("Update Date", "update_date"),
+            ),
+            state = 1,
+        )
 
     private class GenreFilter(name: String) : Filter.TriState(name)
 
-    private class GenreFilterGroup : Filter.Group<GenreFilter>(
-        "Genres",
-        listOf(
-            GenreFilter("Yaoi"),
-            GenreFilter("Doujinshi"),
-            GenreFilter("Shounen Ai"),
-            GenreFilter("Shoujo"),
-            GenreFilter("Yuri"),
-            GenreFilter("Romance"),
-            GenreFilter("Fantasy"),
-            GenreFilter("Comedy"),
-            GenreFilter("Smut"),
-            GenreFilter("Adult"),
-            GenreFilter("School Life"),
-            GenreFilter("Mystery"),
-            GenreFilter("One Shot"),
-            GenreFilter("Ecchi"),
-            GenreFilter("Shounen"),
-            GenreFilter("Martial Arts"),
-            GenreFilter("Shoujo Ai"),
-            GenreFilter("Supernatural"),
-            GenreFilter("Drama"),
-            GenreFilter("Action"),
-            GenreFilter("Adventure"),
-            GenreFilter("Harem"),
-            GenreFilter("Historical"),
-            GenreFilter("Horror"),
-            GenreFilter("Josei"),
-            GenreFilter("Mature"),
-            GenreFilter("Mecha"),
-            GenreFilter("Psychological"),
-            GenreFilter("Sci-fi"),
-            GenreFilter("Seinen"),
-            GenreFilter("Slice Of Life"),
-            GenreFilter("Sports"),
-            GenreFilter("Gender Bender"),
-            GenreFilter("Tragedy"),
-            GenreFilter("Bara"),
-            GenreFilter("Shotacon"),
-            GenreFilter("Webtoons"),
-        ),
-    )
+    private class GenreFilterGroup :
+        Filter.Group<GenreFilter>(
+            "Genres",
+            listOf(
+                GenreFilter("Yaoi"),
+                GenreFilter("Doujinshi"),
+                GenreFilter("Shounen Ai"),
+                GenreFilter("Shoujo"),
+                GenreFilter("Yuri"),
+                GenreFilter("Romance"),
+                GenreFilter("Fantasy"),
+                GenreFilter("Comedy"),
+                GenreFilter("Smut"),
+                GenreFilter("Adult"),
+                GenreFilter("School Life"),
+                GenreFilter("Mystery"),
+                GenreFilter("One Shot"),
+                GenreFilter("Ecchi"),
+                GenreFilter("Shounen"),
+                GenreFilter("Martial Arts"),
+                GenreFilter("Shoujo Ai"),
+                GenreFilter("Supernatural"),
+                GenreFilter("Drama"),
+                GenreFilter("Action"),
+                GenreFilter("Adventure"),
+                GenreFilter("Harem"),
+                GenreFilter("Historical"),
+                GenreFilter("Horror"),
+                GenreFilter("Josei"),
+                GenreFilter("Mature"),
+                GenreFilter("Mecha"),
+                GenreFilter("Psychological"),
+                GenreFilter("Sci-fi"),
+                GenreFilter("Seinen"),
+                GenreFilter("Slice Of Life"),
+                GenreFilter("Sports"),
+                GenreFilter("Gender Bender"),
+                GenreFilter("Tragedy"),
+                GenreFilter("Bara"),
+                GenreFilter("Shotacon"),
+                GenreFilter("Webtoons"),
+            ),
+        )
 
     private fun findHexEncodedVariable(input: String, variable: String): String {
         val regex = Regex("""var $variable\s*=\s*CryptoJS\.enc\.Hex\.parse\("([0-9a-zA-Z]+)"\)""")
@@ -506,10 +572,9 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
         return output.toByteArray()
     }
 
-    private fun buildCookies(cookies: Map<String, String>) =
-        cookies.entries.joinToString(separator = "; ", postfix = ";") {
-            "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
-        }
+    private fun buildCookies(cookies: Map<String, String>) = cookies.entries.joinToString(separator = "; ", postfix = ";") {
+        "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
+    }
 
     private fun String.decodeHex(): ByteArray {
         check(length % 2 == 0) { "Must have an even length" }
@@ -582,19 +647,33 @@ class Mangago : ParsedHttpSource(), ConfigurableSource {
 
     private fun isRemoveTitleVersion() = preferences.getBoolean(REMOVE_TITLE_VERSION_PREF, false)
 
+    private fun customRemoveTitle(): String = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
             key = REMOVE_TITLE_VERSION_PREF
             title = "Remove version information from entry titles"
-            summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
-                "and helps identify duplicate entries in your library. " +
-                "To update existing entries, remove them from your library (unfavorite) and refresh manually. " +
-                "You might also want to clear the database in advanced settings."
+            summary = "This removes version tags like '(Official)' from entry titles."
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
+            title = "Remove custom information from title"
+            summary = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+            setDefaultValue("")
+        }.let(screen::addPreference)
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_RAW_CHAPTERS_PREF
+            title = "Show raw chapters"
+            summary = "Include raw (untranslated) chapters in the chapter list."
             setDefaultValue(false)
         }.let(screen::addPreference)
         addRandomUAPreferenceToScreen(screen)
     }
     companion object {
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+        private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"
+        private const val SHOW_RAW_CHAPTERS_PREF = "SHOW_RAW_CHAPTERS"
     }
 }

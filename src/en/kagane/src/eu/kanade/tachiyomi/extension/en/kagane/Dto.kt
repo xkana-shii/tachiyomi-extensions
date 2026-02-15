@@ -64,8 +64,14 @@ class SearchDto(
         val alternateTitles: List<String> = emptyList(),
     ) {
 
-        fun toSManga(domain: String, showSource: Boolean, sources: Map<String, String>): SManga = SManga.create().apply {
-            title = if (showSource) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.trim()
+        fun toSManga(domain: String, showSource: Boolean, sources: Map<String, String>, removeExtras: Boolean = false): SManga = SManga.create().apply {
+            fun clean(t: String): String {
+                val trimmed = t.trim()
+                return if (removeExtras && trimmed.isNotEmpty()) trimmed.removeTitleExtras() else trimmed
+            }
+
+            val finalTitle = if (showSource) "${clean(this@Book.title)} [${sources[this@Book.sourceId]}]" else clean(this@Book.title)
+            title = finalTitle
             url = id
             thumbnail_url = coverImage?.let { "$domain/api/v2/image/$it" }
         }
@@ -124,7 +130,7 @@ class DetailsDto(
         val label: String?,
     )
 
-    fun toSManga(sourceName: String? = null): SManga = SManga.create().apply {
+    fun toSManga(sourceName: String? = null, removeExtras: Boolean = false): SManga = SManga.create().apply {
         val desc = StringBuilder()
 
         // Add main description
@@ -152,11 +158,17 @@ class DetailsDto(
             .map { it.name }
             .distinct()
             .joinToString(", ")
+        title = if (removeExtras) this@DetailsDto.title.removeTitleExtras() else this@DetailsDto.title
+
+        val genreList = mutableListOf<String>()
+        if (!sourceName.isNullOrBlank()) genreList.add(sourceName.trim())
+        if (!format.isNullOrBlank()) genreList.add(format.trim())
+        genreList += genres.map { it.genreName }
+        genre = genreList.distinct().joinToString(", ")
 
         artist = artists
         author = authors.joinToString()
         description = desc.toString().trim()
-        genre = genres.joinToString { it.genreName }
         status = this@DetailsDto.publicationStatus.toStatus()
     }
 
@@ -206,9 +218,7 @@ class ChapterDto(
         private fun buildChapterName(mode: String = "smart"): String {
             val trimmedTitle = title.trim()
             return when (mode) {
-                "never" -> {
-                    trimmedTitle
-                }
+                "never" -> trimmedTitle
 
                 "always" -> {
                     when {
@@ -219,11 +229,14 @@ class ChapterDto(
                 }
 
                 else -> {
-                    when {
-                        chapterNo.isNullOrBlank() -> trimmedTitle
+                    if (chapterNo.isNullOrBlank()) return trimmedTitle
+                    if (trimmedTitle.isEmpty()) return "Chapter $chapterNo"
 
-                        trimmedTitle.isEmpty() -> "Chapter $chapterNo"
-
+                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au")
+                    for (kw in keywords) {
+                        if (trimmedTitle.contains(kw, ignoreCase = true)) return trimmedTitle
+                    }
+                    return when {
                         trimmedTitle.matches(
                             Regex(
                                 "^\\(S\\d+\\)\\s*(Chapter|Episode|Ch|Ep).*",
@@ -233,7 +246,7 @@ class ChapterDto(
 
                         trimmedTitle.matches(
                             Regex(
-                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*${Regex.escape(chapterNo)}[\\s\\-:.].*",
+                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*${Regex.escape(chapterNo)}(?:[\\s\\-:.].*|\$)",
                                 RegexOption.IGNORE_CASE,
                             ),
                         ) -> trimmedTitle
@@ -245,9 +258,21 @@ class ChapterDto(
                             ),
                         ) -> trimmedTitle
 
-                        trimmedTitle.matches(Regex("^\\d+[\\s\\-:.].*")) -> trimmedTitle
-
-                        else -> "Chapter $chapterNo: $trimmedTitle"
+                        else -> {
+                            val leadingNumberRegex = Regex("^\\s*(\\d+)(?:[\\.:\\-\\s].*|\$)")
+                            val leadingMatch = leadingNumberRegex.find(trimmedTitle)
+                            if (leadingMatch != null) {
+                                val leadingNum = leadingMatch.groupValues[1]
+                                val leadingInt = leadingNum.toIntOrNull()
+                                val chapterInt = chapterNo?.toIntOrNull()
+                                if (leadingInt != null && chapterInt != null) {
+                                    if (leadingInt == chapterInt) return trimmedTitle
+                                } else {
+                                    if (leadingNum == chapterNo) return trimmedTitle
+                                }
+                            }
+                            "Chapter $chapterNo: $trimmedTitle"
+                        }
                     }
                 }
             }
@@ -285,3 +310,28 @@ class IntegrityDto(
     val token: String,
     val exp: Long,
 )
+
+private val TITLE_EXTRAS_KEYWORDS = listOf(
+    "mature",
+    "full ver",
+    "full ver.",
+    "full version",
+    "uncensored",
+    "special episode",
+    "special",
+    "bonus",
+    "steamy",
+    "uncut",
+).joinToString("|") { Regex.escape(it) }
+
+private val TITLE_EXTRAS_REGEX = Regex(
+    """\s*(?:\[[^\]]*(?:$TITLE_EXTRAS_KEYWORDS)[^\]]{0,25}\]|\([^\)]*(?:$TITLE_EXTRAS_KEYWORDS)[^\)]{0,25}\))""",
+    RegexOption.IGNORE_CASE,
+)
+
+private fun String.removeTitleExtras(): String = TITLE_EXTRAS_REGEX.replace(this, "")
+    .replace(Regex("\\s+"), " ")
+    .trim()
+    .trimStart { it == '-' || it == ':' }
+    .trimEnd { it == '-' || it == ':' }
+    .trim()

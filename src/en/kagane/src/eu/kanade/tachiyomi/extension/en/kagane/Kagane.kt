@@ -269,7 +269,8 @@ class Kagane :
 
     override fun mangaDetailsParse(response: Response): SManga {
         val dto = response.parseAs<DetailsDto>()
-        return dto.toSManga()
+        val sourceName = metadata?.sources?.get(dto.sourceId) ?: dto.sourceId
+        return dto.toSManga(sourceName = sourceName, removeExtras = preferences.removeTitleExtras)
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = mangaDetailsRequest(manga.url)
@@ -594,6 +595,9 @@ class Kagane :
     private val SharedPreferences.chapterTitleMode
         get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
+    private val SharedPreferences.removeTitleExtras: Boolean
+        get() = this.getBoolean(REMOVE_TITLE_EXTRAS, false)
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = CONTENT_RATING
@@ -632,6 +636,13 @@ class Kagane :
             title = "Show source name"
             summary = "Show source name in title"
             setDefaultValue(SHOW_SOURCE_DEFAULT)
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = REMOVE_TITLE_EXTRAS
+            title = "Remove extra tags from titles"
+            summary = "Remove bracketed or parenthetical tags (e.g. [mature], (full ver.)) from manga titles when available"
+            setDefaultValue(false)
         }.let(screen::addPreference)
 
         SwitchPreferenceCompat(screen.context).apply {
@@ -693,6 +704,8 @@ class Kagane :
             "Always show chapter number",
             "Never show chapter number",
         )
+
+        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
     }
 
     // ============================= Filters ==============================

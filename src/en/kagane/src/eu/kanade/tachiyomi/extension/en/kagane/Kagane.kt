@@ -35,9 +35,11 @@ import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import okhttp3.CacheControl
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -159,8 +161,44 @@ class Kagane :
                         filter.addToJsonObject(this, "genres", preferences.excludedGenres.toList())
                     }
 
-                    is TagsFilter -> {
-                        filter.addToJsonObject(this, "genres")
+                    is TagsSearchFilter -> {
+                        val rawInput = filter.state.trim()
+                        if (rawInput.isNotBlank()) {
+                            val metadata = cachedMetadata
+                            if (metadata != null) {
+                                val tagEntries = rawInput.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+                                val includeIds = mutableListOf<String>()
+                                val excludeIds = mutableListOf<String>()
+
+                                tagEntries.forEach { entry ->
+                                    val isExclude = entry.startsWith("-")
+                                    val tagName = if (isExclude) entry.removePrefix("-").trim() else entry
+                                    val tagId = metadata.tags.entries.firstOrNull {
+                                        it.value.equals(tagName, ignoreCase = true)
+                                    }?.key
+                                    if (tagId != null) {
+                                        if (isExclude) excludeIds.add(tagId) else includeIds.add(tagId)
+                                    }
+                                }
+
+                                if (includeIds.isNotEmpty() || excludeIds.isNotEmpty()) {
+                                    putJsonObject("tags") {
+                                        put("match_all", false)
+                                        if (includeIds.isNotEmpty()) {
+                                            putJsonArray("values") {
+                                                includeIds.forEach { add(it) }
+                                            }
+                                        }
+                                        if (excludeIds.isNotEmpty()) {
+                                            putJsonArray("exclude") {
+                                                excludeIds.forEach { add(it) }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     is SourcesFilter -> {
@@ -211,7 +249,6 @@ class Kagane :
                     apiHeaders,
                     buildJsonObject { put("source_types", null) }.toJsonString()
                         .toRequestBody("application/json".toMediaType()),
-                    CacheControl.FORCE_CACHE,
                 ),
             ).execute()
 
@@ -282,10 +319,7 @@ class Kagane :
         )
 
         return dto.seriesBooks.map { book ->
-            book.toSChapter(useSourceChapterNumber).apply {
-                // Fix the URL to include the actual seriesId
-                url = "/series/$seriesId/reader/${book.id}"
-            }
+            book.toSChapter(seriesId, useSourceChapterNumber)
         }.reversed()
     }
 
@@ -307,11 +341,13 @@ class Kagane :
     private val fairPlayCertificate by lazy { getCertificate("$apiUrl/api/v2/static/crt.crt") }
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> {
+        if (chapter.url.contains(";")) {
+            throw Exception("Outdated chapter URL. Please refresh the chapter list")
+        }
+
         val chapterId = "$baseUrl${chapter.url}".toHttpUrl().pathSegments.last()
         val challengeResp = getChallengeResponse(chapterId)
-        Log.d("challenge", challengeResp.accessToken)
-        Log.d("challenge", "${challengeResp.pages.map { page -> page.pageUuid }}")
-        Log.d("challenge", challengeResp.cacheUrl)
+
         accessToken = challengeResp.accessToken
         cacheUrl = challengeResp.cacheUrl
 
@@ -702,7 +738,7 @@ class Kagane :
             filters.addAll(
                 listOf(
                     GenresFilter(metadata.getGenresList()),
-                    TagsFilter(metadata.getTagsList()),
+                    TagsSearchFilter(),
                     SourcesFilter(
                         metadata.getSourcesList().filter {
                             !(!preferences.showScanlations && !isOfficialSource(it.id, metadata))

@@ -28,12 +28,10 @@ class SourcesDto(
 )
 
 @Serializable
-class SourceDto(
-    @SerialName("source_id")
-    val sourceId: String,
+data class SourceDto(
+    @SerialName("source_id") val sourceId: String,
+    @SerialName("source_type") val sourceType: String, // "Official", "Unofficial", "Mixed"
     val title: String,
-    @SerialName("source_type")
-    val sourceType: String,
 )
 
 @Serializable
@@ -232,7 +230,7 @@ class ChapterDto(
                     if (chapterNo.isNullOrBlank()) return trimmedTitle
                     if (trimmedTitle.isEmpty()) return "Chapter $chapterNo"
 
-                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au")
+                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au", "side story", "creator's note")
                     for (kw in keywords) {
                         if (trimmedTitle.contains(kw, ignoreCase = true)) return trimmedTitle
                     }

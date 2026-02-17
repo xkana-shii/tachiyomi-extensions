@@ -156,7 +156,6 @@ class Kagane :
                 put("title", query)
             }
 
-            // Source display mode -> restrict source types returned by API
             val displayMode = preferences.sourceDisplayMode
             val sourceTypes = if (displayMode == "official") {
                 listOf("Official")
@@ -732,6 +731,8 @@ class Kagane :
         private const val WVD_KEY = "wvd_key"
         private const val WVD_DEFAULT = ""
 
+        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
+
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
         private const val CHAPTER_TITLE_MODE_DEFAULT = "smart"
         internal val CHAPTER_TITLE_MODES = arrayOf(
@@ -745,7 +746,6 @@ class Kagane :
             "Never show chapter number",
         )
 
-        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
     }
 
     // ============================= Filters ==============================

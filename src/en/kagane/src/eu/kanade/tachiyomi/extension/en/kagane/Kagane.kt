@@ -745,7 +745,6 @@ class Kagane :
             "Always show chapter number",
             "Never show chapter number",
         )
-
     }
 
     // ============================= Filters ==============================

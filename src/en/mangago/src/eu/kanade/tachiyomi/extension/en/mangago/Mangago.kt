@@ -48,34 +48,19 @@ class Mangago :
     ParsedHttpSource(),
     ConfigurableSource {
 
-    private data class PageContext(
-        val chapterKey: String,
-        val pageNumber: Int,
-    )
-
-    private data class ChapterState(
-        val pageByNumber: MutableMap<Int, Page>,
-        val pageUrlByNumber: Map<Int, String>,
-        val firstChunkStart: Int,
-        val firstChunkUrls: List<String>,
-        val hasEmptyUrls: Boolean,
-        val loadedChunks: MutableSet<Int> = mutableSetOf(),
-        val chunkLocks: MutableMap<Int, Any> = mutableMapOf(),
-    )
-
     private data class ChapterJsDecryptCache(
         val deobfChapterJs: String,
         val key: ByteArray,
         val iv: ByteArray,
-        val time: Long,
     )
 
-    private val chapterStates = mutableMapOf<String, ChapterState>()
-    private val pageContexts = WeakHashMap<Page, PageContext>()
-    private val chunkStateLock = Any()
+    private val chapterImagesCache = mutableMapOf<String, MutableList<String?>>()
+    private val chapterImagesCacheMutex = Any()
+    private val chapterImagesFetchLockMap = mutableMapOf<String, Any>()
+
     private val chapterJsCache = mutableMapOf<String, ChapterJsDecryptCache>()
-    private val chapterJsCacheLocks = mutableMapOf<String, Any>()
-    private val chapterJsCacheLock = Any()
+    private val chapterJsFetchLockMap = mutableMapOf<String, Any>()
+    private val chapterJsCacheMutex = Any()
 
     override val name = "Mangago"
 
@@ -307,43 +292,54 @@ class Mangago :
     }
 
     override fun pageListParse(document: Document): List<Page> {
+        // Clear JS cache
+        val chapterKey = getChapterKeyFromUrl(document.location())
+        synchronized(chapterJsCacheMutex) {
+            chapterJsCache.remove(chapterKey)
+        }
+
         val dropdownItems = document.select("div ul#dropdown-menu-page li a")
 
         val pageLinks = dropdownItems.mapIndexed { idx, item ->
             val href = item.attr("abs:href")
-            val pageNumber = getPageNumberFromUrl(href) ?: (idx + 1)
-            pageNumber to href
-        }.sortedBy { it.first }
-
+            idx to href
+        }
+        // Gets the first array of image URLs from the base chapter URL
         val firstUrls = getChapterImageUrls(document)
         if (firstUrls.isEmpty()) throw Exception("Mangago: pageListParse failed - decoded image url list is empty for ${document.location()}")
+        // Webcomics have the array of images partially filled with empty strings [eg: 1,2,3,,, or ,,,4,5,6]
         val hasEmptyUrls = firstUrls.any { it.isBlank() }
 
-        val pages = pageLinks.mapIndexed { idx, (_, href) ->
-            Page(idx, url = href)
-        }
-
-        val chapterKey = getChapterKeyFromUrl(document.location())
-        val currentPageNumber = getPageNumberFromUrl(document.location()) ?: pageLinks.firstOrNull()?.first ?: 1
-        val firstChunkStart = getChunkStartPage(currentPageNumber)
-
-        val pageByNumber = mutableMapOf<Int, Page>()
-        pageLinks.forEachIndexed { idx, (pageNumber, _) ->
-            val page = pages[idx]
-            pageByNumber[pageNumber] = page
-            synchronized(chunkStateLock) {
-                pageContexts[page] = PageContext(chapterKey, pageNumber)
+        if (!hasEmptyUrls) {
+            // Mangas have the full array of image URLs in the first request
+            return pageLinks.mapIndexed { idx, (pageIndex, href) ->
+                val resolved = firstUrls.getOrNull(pageIndex)
+                    ?: firstUrls.getOrNull(idx)
+                if (resolved.isNullOrBlank()) {
+                    throw Exception("Mangago: pageListParse failed - could not resolve image url for page ${pageIndex + 1}")
+                }
+                Page(idx, url = "", imageUrl = resolved)
             }
         }
 
-        synchronized(chunkStateLock) {
-            chapterStates[chapterKey] = ChapterState(
-                pageByNumber = pageByNumber,
-                pageUrlByNumber = pageLinks.toMap(),
-                firstChunkStart = firstChunkStart,
-                firstChunkUrls = firstUrls,
-                hasEmptyUrls = hasEmptyUrls,
-            )
+        synchronized(chapterImagesCacheMutex) {
+            chapterImagesCache[chapterKey] = MutableList(pageLinks.size) { null }
+        }
+
+        val pages = pageLinks.mapIndexed { idx, (pageIndex, href) ->
+            val resolved = firstUrls.getOrNull(pageIndex)
+            if (!resolved.isNullOrBlank()) {
+                // Seed cache with non-empty URLs from the first request.
+                synchronized(chapterImagesCacheMutex) {
+                    val cached = chapterImagesCache[chapterKey]
+                    if (cached != null && cached.size > pageIndex) {
+                        cached[pageIndex] = resolved
+                    }
+                }
+                Page(idx, url = "", imageUrl = resolved)
+            } else {
+                Page(idx, url = href)
+            }
         }
 
         return pages
@@ -352,71 +348,51 @@ class Mangago :
     override fun fetchImageUrl(page: Page): Observable<String> = Observable.fromCallable {
         page.imageUrl?.takeIf { it.isNotBlank() }?.let { return@fromCallable it }
 
-        val context = synchronized(chunkStateLock) { pageContexts[page] } ?: run {
-            val pageUrl = page.url.takeIf { it.isNotBlank() } ?: return@run null
-            val pageNumber = getPageNumberFromUrl(pageUrl) ?: return@run null
-            val chapterKey = getChapterKeyFromUrl(pageUrl)
-            val derived = PageContext(chapterKey, pageNumber)
+        val chapterKey = getChapterKeyFromUrl(page.url)
 
-            synchronized(chunkStateLock) {
-                pageContexts[page] = derived
-            }
-            derived
-        } ?: throw Exception("Mangago: fetchImageUrl failed - missing page context for page index ${page.index}, url='${page.url}'")
-
-        val state = synchronized(chunkStateLock) { chapterStates[context.chapterKey] }
-            ?: run {
-                val keys = synchronized(chunkStateLock) { chapterStates.keys.joinToString(limit = 10) }
-                throw Exception("Mangago: fetchImageUrl failed - missing chapter state for key '${context.chapterKey}'. availableKeys=[$keys], pageUrl='${page.url}'")
-            }
-
-        val chunkStart = getChunkStartPage(context.pageNumber)
-        val lock = synchronized(chunkStateLock) {
-            if (state.loadedChunks.contains(chunkStart) && !state.pageByNumber[context.pageNumber]?.imageUrl.isNullOrBlank()) {
-                return@fromCallable state.pageByNumber[context.pageNumber]?.imageUrl
-                    ?: throw Exception("Mangago: fetchImageUrl failed - cached chunk reports loaded but image url is still null for page ${context.pageNumber} (chapter '${context.chapterKey}')")
-            }
-            state.chunkLocks.getOrPut(chunkStart) { Any() }
+        val resolvedFromCache = synchronized(chapterImagesCacheMutex) {
+            val cached = chapterImagesCache[chapterKey]
+            cached?.getOrNull(page.index)
+        }
+        if (!resolvedFromCache.isNullOrBlank()) {
+            return@fromCallable resolvedFromCache
         }
 
-        synchronized(lock) {
-            if (!state.loadedChunks.contains(chunkStart) || state.pageByNumber[context.pageNumber]?.imageUrl.isNullOrBlank()) {
-                val chunkUrls = if (chunkStart == state.firstChunkStart) {
-                    state.firstChunkUrls
-                } else {
-                    val chunkUrl = state.pageUrlByNumber[chunkStart]
-                        ?: throw Exception("Mangago: fetchImageUrl failed - could not find chunk start page url for chunkStart=$chunkStart in chapter '${context.chapterKey}'")
-                    val chunkDocument = client.newCall(GET(chunkUrl, headers)).execute().use { response ->
-                        Jsoup.parse(response.body.string(), chunkUrl)
-                    }
-                    getChapterImageUrls(chunkDocument)
-                }
+        val fetchLock = synchronized(chapterImagesCacheMutex) {
+            chapterImagesFetchLockMap.getOrPut(chapterKey) { Any() }
+        }
+        synchronized(fetchLock) {
+            // Double-check after acquiring fetch lock
+            synchronized(chapterImagesCacheMutex) {
+                val cached = chapterImagesCache[chapterKey]
+                cached?.getOrNull(page.index)
+            }?.takeIf { it.isNotBlank() }?.let {
+                return@fromCallable it
+            }
 
-                if (!state.hasEmptyUrls) {
-                    state.pageUrlByNumber.keys.sorted().forEachIndexed { idx, pageNumber ->
-                        val imageUrl = chunkUrls.getOrNull(idx)
-                        if (!imageUrl.isNullOrBlank()) {
-                            state.pageByNumber[pageNumber]?.imageUrl = imageUrl
+            val pageDocument = client.newCall(GET(page.url, headers)).execute().use { response ->
+                Jsoup.parse(response.body.string(), page.url)
+            }
+            val urls = getChapterImageUrls(pageDocument)
+
+            synchronized(chapterImagesCacheMutex) {
+                val cached = chapterImagesCache.getOrPut(chapterKey) { MutableList(urls.size) { null } }
+                urls.forEachIndexed { idx, item ->
+                    if (item.isNotBlank()) {
+                        if (idx < cached.size) {
+                            cached[idx] = item
                         }
                     }
-                } else {
-                    val nonEmptyUrls = chunkUrls.filter { it.isNotBlank() }
-                    nonEmptyUrls.forEachIndexed { idx, imageUrl ->
-                        val pageNumber = chunkStart + idx
-                        state.pageByNumber[pageNumber]?.imageUrl = imageUrl
-                    }
-                }
-
-                synchronized(chunkStateLock) {
-                    state.loadedChunks.add(chunkStart)
-                    state.chunkLocks.remove(chunkStart)
                 }
             }
         }
 
-        val resolved = state.pageByNumber[context.pageNumber]?.imageUrl
+        val resolved = synchronized(chapterImagesCacheMutex) {
+            chapterImagesCache[chapterKey]?.getOrNull(page.index)
+        }
+
         if (resolved.isNullOrBlank()) {
-            throw Exception("Mangago: fetchImageUrl failed - could not resolve image url for page ${context.pageNumber} in chapter '${context.chapterKey}'")
+            throw Exception("Mangago: fetchImageUrl failed - could not resolve image url for page ${page.index + 1}")
         }
         resolved
     }
@@ -427,12 +403,6 @@ class Mangago :
         }
         return super.pageListRequest(chapter)
     }
-
-    private var cachedDeofChapterJS: String? = null
-    private var cachedKey: ByteArray? = null
-    private var cachedIv: ByteArray? = null
-    private var cachedTime: Long = 0
-    private val maxCacheTime = 1000 * 60 * 5 // 5 minutes
 
     override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException("Unused")
 
@@ -485,23 +455,21 @@ class Mangago :
     }
 
     private fun getOrBuildChapterJsCache(chapterJsUrl: String): ChapterJsDecryptCache {
-        val now = System.currentTimeMillis()
-        synchronized(chapterJsCacheLock) {
+        synchronized(chapterJsCacheMutex) {
             val cached = chapterJsCache[chapterJsUrl]
-            if (cached != null && now - cached.time <= maxCacheTime) {
+            if (cached != null) {
                 return cached
             }
         }
 
-        val lock = synchronized(chapterJsCacheLock) {
-            chapterJsCacheLocks.getOrPut(chapterJsUrl) { Any() }
+        val lock = synchronized(chapterJsCacheMutex) {
+            chapterJsFetchLockMap.getOrPut(chapterJsUrl) { Any() }
         }
 
         synchronized(lock) {
-            val secondCheckNow = System.currentTimeMillis()
-            synchronized(chapterJsCacheLock) {
+            synchronized(chapterJsCacheMutex) {
                 val cached = chapterJsCache[chapterJsUrl]
-                if (cached != null && secondCheckNow - cached.time <= maxCacheTime) {
+                if (cached != null) {
                     return cached
                 }
             }
@@ -514,25 +482,12 @@ class Mangago :
                 deobfChapterJs = deobfChapterJs,
                 key = key,
                 iv = iv,
-                time = System.currentTimeMillis(),
             )
 
-            synchronized(chapterJsCacheLock) {
+            synchronized(chapterJsCacheMutex) {
                 chapterJsCache[chapterJsUrl] = entry
             }
             return entry
-        }
-    }
-
-    private fun getChunkStartPage(pageNumber: Int): Int = ((pageNumber - 1) / 5) * 5 + 1
-
-    private fun getPageNumberFromUrl(url: String): Int? {
-        val normalized = url.removeSuffix("/")
-        val lastSegment = normalized.substringAfterLast("/")
-
-        return when {
-            lastSegment.startsWith("pg-") -> lastSegment.substringAfter("pg-").toIntOrNull()
-            else -> lastSegment.toIntOrNull()
         }
     }
 
@@ -831,6 +786,7 @@ class Mangago :
         }.let(screen::addPreference)
         addRandomUAPreferenceToScreen(screen)
     }
+
     companion object {
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
         private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"

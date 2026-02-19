@@ -76,12 +76,6 @@ class YaoiMangaOnline : ParsedHttpSource() {
                 it.html().replace("<br>", "").split("\n").joinToString("\n") { line ->
                     line.trim()
                 }
-
-                is TagFilter -> if (it.state != 0) {
-                    addEncodedPathSegments("tag/$it")
-                }
-
-                else -> {}
             }
         genre = document.select(".meta-tags > a").joinToString { it.text() }
         author = document.select(".entry-content > p:contains(Mangaka:)").text()

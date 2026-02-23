@@ -215,21 +215,107 @@ class MangaPlanet :
         }
     }
 
+    private fun coversChapterFromVolumeHeaderId(mangaUrl: String, volumeHeaderId: String, volumeTitle: String): SChapter = SChapter.create().apply {
+        name = "Covers — $volumeTitle"
+        url = "$mangaUrl?covers=$volumeHeaderId"
+        date_upload = 0L
+    }
+
+    private fun parseCoversChapterUrl(chapterUrl: String): Pair<String, String>? {
+        val idx = chapterUrl.indexOf("?covers=")
+        if (idx == -1) return null
+
+        val mangaUrl = chapterUrl.substring(0, idx)
+        val volumeHeaderId = chapterUrl.substring(idx + "?covers=".length)
+        if (mangaUrl.isBlank() || volumeHeaderId.isBlank()) return null
+
+        return mangaUrl to volumeHeaderId
+    }
+
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
+        val mangaUrl = response.request.url.encodedPath
 
-        return document.select(chapterListSelector())
-            .filter { e ->
-                e.selectFirst("p")?.ownText()?.contains("Arrives on") != true
+        val chapters = mutableListOf<SChapter>()
+
+        // Build in website order first (Volume 1 block, then Volume 2 block, etc),
+        // while keeping the covers chapter directly before that volume's chapters.
+        document.select("div[id^=accordion_]").forEach { volumeAccordion ->
+            val header = volumeAccordion.selectFirst("h3[id^=vol_title_]") ?: return@forEach
+            val volumeHeaderId = header.id().trim()
+            val volumeTitle = header.text().trim()
+
+            if (volumeHeaderId.isNotEmpty() && volumeTitle.isNotEmpty()) {
+                chapters += coversChapterFromVolumeHeaderId(
+                    mangaUrl = mangaUrl,
+                    volumeHeaderId = volumeHeaderId,
+                    volumeTitle = volumeTitle,
+                )
             }
-            .map { chapterFromElement(it) }
-            .reversed()
+
+            volumeAccordion.select(chapterListSelector())
+                .filter { e ->
+                    e.selectFirst("p")?.ownText()?.contains("Arrives on") != true
+                }
+                .map { chapterFromElement(it) }
+                .forEach { chapters += it }
+        }
+
+        // Fallback: if the site layout changes and accordion blocks aren't found,
+        // keep previous behavior for normal chapters.
+        if (chapters.isEmpty()) {
+            return document.select(chapterListSelector())
+                .filter { e ->
+                    e.selectFirst("p")?.ownText()?.contains("Arrives on") != true
+                }
+                .map { chapterFromElement(it) }
+                .reversed()
+        }
+
+        // Reverse the complete chapter list while preserving the website's internal ordering structure.
+        return chapters.asReversed()
     }
 
     private val reader by lazy { SpeedBinbReader(client, headers, json) }
 
+    private fun coversPageListParse(mangaUrl: String, volumeHeaderId: String): List<Page> {
+        val url = baseUrl + mangaUrl
+        val response = client.newCall(GET(url, headers)).execute()
+        val document = response.asJsoup()
+
+        val header = document.selectFirst("h3#$volumeHeaderId") ?: return emptyList()
+
+        // The images are in the same padded div as the h3, so target that specific div.
+        val section = header.closest("div[style]") ?: header.parent() ?: return emptyList()
+
+        val imageUrls = section.select("div.row img").mapNotNull { img ->
+            val dataSrc = img.absUrl("data-src")
+            if (dataSrc.isNotBlank()) return@mapNotNull dataSrc
+
+            val src = img.absUrl("src")
+            if (src.isNotBlank()) return@mapNotNull src
+
+            null
+        }.distinct()
+
+        return imageUrls.mapIndexed { index, imageUrl ->
+            Page(index, "", imageUrl)
+        }
+    }
+
     override fun pageListParse(document: Document): List<Page> {
-        if (document.selectFirst("a[href\$=account/sign-up]") != null) {
+        val requestUrl = document.location().removePrefix(baseUrl)
+        val coversInfo = parseCoversChapterUrl(requestUrl)
+        if (coversInfo != null) {
+            val (mangaUrl, volumeHeaderId) = coversInfo
+            val pages = coversPageListParse(mangaUrl, volumeHeaderId)
+            if (pages.isEmpty()) {
+                throw Exception("No covers found for this volume")
+            }
+            return pages
+        }
+
+        if (document.selectFirst("a[href$=account/sign-up]") != null) {
             throw Exception("Sign up in WebView to read this chapter")
         }
 

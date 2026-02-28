@@ -162,10 +162,10 @@ class DetailsDto(
         author = authors.joinToString()
         description = desc.toString().trim()
         genre = buildList {
-            if (sourceName != null) add(sourceName)
+            sourceName?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(genres.map { it.genreName })
-            if (format != null) add(format)
-        }.distinct().joinToString()
+            this@DetailsDto.format?.takeIf { it.isNotBlank() }?.let { add(it) }
+        }.joinToString()
         status = this@DetailsDto.publicationStatus.toStatus()
     }
 

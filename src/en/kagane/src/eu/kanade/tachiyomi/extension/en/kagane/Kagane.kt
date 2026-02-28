@@ -303,6 +303,8 @@ class Kagane :
 
     // =========================== Manga Details ============================
 
+    override val supportsRelatedMangas = false
+
     override fun mangaDetailsParse(response: Response): SManga {
         val dto = response.parseAs<DetailsDto>()
         val sourceName = metadata?.sources?.firstOrNull { it.sourceId == dto.sourceId }?.title ?: dto.sourceId
@@ -765,6 +767,7 @@ class Kagane :
             ContentRatingFilter(
                 preferences.contentRating.toSet(),
             ),
+            FormatFilter(),
             Filter.Separator(),
         )
 

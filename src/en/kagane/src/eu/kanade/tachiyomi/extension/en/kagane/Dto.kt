@@ -137,12 +137,6 @@ class DetailsDto(
             desc.append("\n")
         }
 
-        // Add source name
-        if (sourceName != null && this@DetailsDto.sourceId != null) {
-            if (desc.isNotEmpty()) desc.append("\n")
-            desc.append("Source: [$sourceName]($baseUrl/sources/${this@DetailsDto.sourceId})\n")
-        }
-
         // Add alternate titles at the end
         if (seriesAlternateTitles.isNotEmpty()) {
             if (desc.isNotEmpty()) desc.append("\n")
@@ -164,15 +158,14 @@ class DetailsDto(
             .joinToString(", ")
         title = if (removeExtras) this@DetailsDto.title.removeTitleExtras() else this@DetailsDto.title
 
-        val genreList = mutableListOf<String>()
-        if (!sourceName.isNullOrBlank()) genreList.add(sourceName.trim())
-        if (!format.isNullOrBlank()) genreList.add(format.trim())
-        genreList += genres.map { it.genreName }
-        genre = genreList.distinct().joinToString(", ")
-
         artist = artists
         author = authors.joinToString()
         description = desc.toString().trim()
+        genre = buildList {
+            if (sourceName != null) add(sourceName)
+            addAll(genres.map { it.genreName })
+            if (format != null) add(format)
+        }.distinct().joinToString()
         status = this@DetailsDto.publicationStatus.toStatus()
     }
 

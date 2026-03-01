@@ -777,7 +777,63 @@ class Kagane :
                 .build()
         }.build()
 
+    private val metadataBlockingClient = metadataClient.newBuilder()
+        .connectTimeout(850, TimeUnit.MILLISECONDS)
+        .readTimeout(850, TimeUnit.MILLISECONDS)
+        .writeTimeout(850, TimeUnit.MILLISECONDS)
+        .callTimeout(1000, TimeUnit.MILLISECONDS)
+        .build()
+
+    private fun fetchMetadataBlocking() {
+        if (metadata != null) return
+
+        val start = System.currentTimeMillis()
+        try {
+            val genreResponse = metadataBlockingClient.newCall(
+                GET("$apiUrl/api/v2/genres/list", apiHeaders),
+            ).execute()
+
+            val tagsResponse = metadataBlockingClient.newCall(
+                GET("$apiUrl/api/v2/tags/list", apiHeaders),
+            ).execute()
+
+            val sourcesResponse = metadataBlockingClient.newCall(
+                POST(
+                    "$apiUrl/api/v2/sources/list",
+                    apiHeaders,
+                    buildJsonObject { put("source_types", null) }.toJsonString()
+                        .toRequestBody("application/json".toMediaType()),
+                ),
+            ).execute()
+
+            if (genreResponse.isSuccessful && tagsResponse.isSuccessful && sourcesResponse.isSuccessful) {
+                val genres = genreResponse.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
+                val tags = tagsResponse.parseAs<List<TagDto>>().associate { it.id to it.tagName }
+                val sources = sourcesResponse.parseAs<SourcesDto>().sources
+
+                metadata = MetadataDto(genres, tags, sources)
+
+                val tookMs = System.currentTimeMillis() - start
+                Log.d(name, "Metadata fetched and updated (blocking, took ${tookMs}ms)")
+            } else {
+                val tookMs = System.currentTimeMillis() - start
+                Log.e(name, "Failed to fetch metadata (blocking): One or more requests failed (took ${tookMs}ms)")
+            }
+
+            genreResponse.close()
+            tagsResponse.close()
+            sourcesResponse.close()
+        } catch (e: Exception) {
+            val tookMs = System.currentTimeMillis() - start
+            Log.e(name, "Failed to fetch metadata (blocking, took ${tookMs}ms)", e)
+        }
+    }
+
     override fun getFilterList(): FilterList {
+        if (metadata == null) {
+            fetchMetadataBlocking()
+        }
+
         val filters: MutableList<Filter<*>> = mutableListOf(
             SortFilter(),
             ContentRatingFilter(
@@ -823,6 +879,7 @@ class Kagane :
 
     private fun fetchMetadata() {
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            val start = System.currentTimeMillis()
             try {
                 val genreResponse = metadataClient.newCall(
                     GET("$apiUrl/api/v2/genres/list", apiHeaders),
@@ -845,12 +902,15 @@ class Kagane :
                     val sources = sourcesResponse.parseAs<SourcesDto>().sources
 
                     metadata = MetadataDto(genres, tags, sources)
-                    Log.d(name, "Metadata fetched and updated")
+                    val tookMs = System.currentTimeMillis() - start
+                    Log.d(name, "Metadata fetched and updated (took ${tookMs}ms)")
                 } else {
-                    Log.e(name, "Failed to fetch metadata: One or more requests failed")
+                    val tookMs = System.currentTimeMillis() - start
+                    Log.e(name, "Failed to fetch metadata: One or more requests failed (took ${tookMs}ms)")
                 }
             } catch (e: Exception) {
-                Log.e(name, "Failed to fetch metadata", e)
+                val tookMs = System.currentTimeMillis() - start
+                Log.e(name, "Failed to fetch metadata (took ${tookMs}ms)", e)
             }
         }
     }

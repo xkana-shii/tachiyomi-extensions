@@ -307,7 +307,23 @@ class Kagane :
 
     override fun mangaDetailsParse(response: Response): SManga {
         val dto = response.parseAs<DetailsDto>()
-        val sourceName = metadata?.sources?.firstOrNull { it.sourceId == dto.sourceId }?.title ?: dto.sourceId
+        val sourceName = dto.sourceId?.let { sourceId ->
+            metadata?.sources?.firstOrNull { it.sourceId == sourceId }?.title
+                ?: try {
+                    metadataClient.newCall(
+                        POST(
+                            "$apiUrl/api/v2/sources/list",
+                            apiHeaders,
+                            buildJsonObject { put("source_types", null) }.toJsonString()
+                                .toRequestBody("application/json".toMediaType()),
+                        ),
+                    ).execute().takeIf { it.isSuccessful }
+                        ?.parseAs<SourcesDto>()?.sources
+                        ?.firstOrNull { it.sourceId == sourceId }?.title
+                } catch (_: Exception) {
+                    null
+                }
+        }
         return dto.toSManga(sourceName = sourceName, removeExtras = preferences.removeTitleExtras)
     }
 

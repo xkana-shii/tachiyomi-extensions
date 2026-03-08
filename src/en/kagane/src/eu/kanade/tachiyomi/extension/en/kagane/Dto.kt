@@ -229,7 +229,7 @@ class ChapterDto(
                     if (chapterNo.isNullOrBlank()) return trimmedTitle
                     if (trimmedTitle.isEmpty()) return "Chapter $chapterNo"
 
-                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au", "side story", "creator's note")
+                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au", "side story", "creator's note", "scheduled break")
                     for (kw in keywords) {
                         if (trimmedTitle.contains(kw, ignoreCase = true)) return trimmedTitle
                     }

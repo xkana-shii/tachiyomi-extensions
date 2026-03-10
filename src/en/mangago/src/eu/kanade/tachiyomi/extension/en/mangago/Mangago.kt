@@ -169,82 +169,69 @@ class Mangago :
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         val originalTitle = document.selectFirst(".w-title h1")!!.text()
-        val cleanedTitle = originalTitle
-            .replace(Regex(customRemoveTitle()), "")
-            .replace(if (isRemoveTitleVersion()) titleRegex else Regex(""), "")
-            .trim()
-        title = cleanedTitle
-        document.getElementById("information")!!.let {
-            thumbnail_url = it.selectFirst("img")!!.attr("abs:src")
-            var alternativeTitles = ""
-            description = it.selectFirst(".manga_summary")?.let { summary ->
-                summary.selectFirst("font")?.remove()
-                summary.text()
-            }
-            it.select(".manga_info li, .manga_right tr").forEach { el ->
-                when (el.selectFirst("b, label")!!.text().lowercase()) {
-                    "alternative:" -> alternativeTitles = el.text().substringAfter(":").trim()
+        val matches = mutableListOf<String>()
 
+        title = originalTitle
+            .let { t ->
+                if (isRemoveTitleVersion()) {
+                    var s = t
+                    while (titleRegex.containsMatchIn(s)) {
+                        val match = titleRegex.find(s)!!
+                        matches.add(match.value)
+                        s = s.replace(match.value, "").trim()
+                    }
+                    s
+                } else {
+                    t
+                }
+            }
+            .let { t ->
+                val pattern = customRemoveTitle()
+                if (pattern.isNotEmpty()) {
+                    val regex = Regex(pattern, RegexOption.IGNORE_CASE)
+                    regex.findAll(t).forEach { matches.add(it.value) }
+                    regex.replace(t, "").trim()
+                } else {
+                    t
+                }
+            }
+
+        document.getElementById("information")!!.let { info ->
+            thumbnail_url = info.selectFirst("img")!!.attr("abs:src")
+
+            var altTitles = ""
+            description = info.selectFirst(".manga_summary")?.apply { selectFirst("font")?.remove() }?.text()
+
+            info.select(".manga_info li, .manga_right tr").forEach { el ->
+                when (el.selectFirst("b, label")!!.text().lowercase()) {
+                    "alternative:" -> altTitles = el.text().substringAfter(":").trim()
                     "status:" -> status = when (el.selectFirst("span")!!.text().lowercase()) {
                         "ongoing" -> SManga.ONGOING
                         "completed" -> SManga.COMPLETED
                         else -> SManga.UNKNOWN
                     }
-
                     "author(s):", "author:" -> author = el.select("a").joinToString { it.text() }
-
                     "genre(s):" -> genre = el.select("a").joinToString { it.text() }
                 }
             }
 
+            val parsedAltTitles = altTitles
+                .takeUnless { it.isBlank() || it.equals("none", ignoreCase = true) || it.equals("N/A", ignoreCase = true) }
+                ?.let { t ->
+                    val cleaned = if (t.contains(';')) {
+                        t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
+                    } else {
+                        t.trimEnd(',').split(Regex("\\s*,\\s*"))
+                    }
+                    cleaned.map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
+                }
+
+            matches.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
+
             description = buildString {
                 append(description)
-                val names = alternativeTitles.takeUnless { it.isBlank() || it.trim().equals("none", ignoreCase = true) || it.trim().equals("N/A", ignoreCase = true) }?.let {
-                    var semicolonSeparated = it.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
-                    if (semicolonSeparated.contains(';')) {
-                        semicolonSeparated = semicolonSeparated.replace(Regex(";\\s*$"), "")
-                        semicolonSeparated.split(Regex("\\s*;\\s*"))
-                    } else {
-                        val commaSeparated = it.replace(Regex(",\\s*$"), "")
-                        commaSeparated.split(Regex("\\s*,\\s*"))
-                    }
-                }
-                    ?.map { it.trim() }
-                    ?.filter { it.isNotEmpty() }
-                    ?.joinToString("\n- ", prefix = "- ")
-
-                if (!names.isNullOrEmpty()) {
-                    append("\n\n----\n#### **Alternative Titles**\n", names)
-                }
-                val matches = mutableListOf<String>()
-
-                val tempTitle = if (isRemoveTitleVersion()) {
-                    var shortName = originalTitle
-                    while (titleRegex.containsMatchIn(shortName)) {
-                        val match = titleRegex.find(shortName)!!
-                        matches.add(match.value)
-                        shortName = shortName.replace(match.value, "").trim()
-                    }
-                    shortName
-                } else {
-                    originalTitle
-                }
-
-                if (customRemoveTitle().isNotEmpty()) {
-                    val customRegex = Regex(customRemoveTitle(), RegexOption.IGNORE_CASE)
-                    customRegex.findAll(tempTitle).forEach { matchResult ->
-                        matches.add(matchResult.value)
-                    }
-                }
-
-                matches.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
-
-                if (matches.isNotEmpty()) {
-                    append("\n\n----\n#### **Removed from title**\n")
-                    matches.forEach { match ->
-                        append("- `$match`\n")
-                    }
-                }
+                if (!parsedAltTitles.isNullOrEmpty()) append("\n\n----\n#### **Alternative Titles**\n$parsedAltTitles")
+                if (matches.isNotEmpty()) append("\n\n----\n#### **Removed from title**\n${matches.joinToString("") { "- `$it`\n" }}")
             }.trim()
         }
     }

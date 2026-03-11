@@ -331,6 +331,9 @@ abstract class Luscious(
                             getResolutionPref() != "-1" -> {
                                 it.jsonObject["thumbnails"]!!.jsonArray[getResolutionPref()?.toInt()!!].jsonObject["url"]!!.jsonPrimitive.content
                             }
+                            it.jsonObject["url_to_video"]!!.jsonPrimitive.contentOrNull != null -> {
+                                it.jsonObject["url_to_video"]!!.jsonPrimitive.content.toHttpUrl().newBuilder().host("ah-img.luscious.net").build().toString().replace(".mp4", ".gif")
+                            }
                             it.jsonObject["url_to_original"]!!.jsonPrimitive.contentOrNull != null -> {
                                 it.jsonObject["url_to_original"]!!.jsonPrimitive.content
                             }
@@ -435,6 +438,9 @@ abstract class Luscious(
                 val url = when {
                     getResolutionPref() != "-1" -> {
                         it.jsonObject["thumbnails"]!!.jsonArray[getResolutionPref()?.toInt()!!].jsonObject["url"]!!.jsonPrimitive.content
+                    }
+                    it.jsonObject["url_to_video"]!!.jsonPrimitive.contentOrNull != null -> {
+                        it.jsonObject["url_to_video"]!!.jsonPrimitive.content.toHttpUrl().newBuilder().host("ah-img.luscious.net").build().toString().replace(".mp4", ".gif")
                     }
                     it.jsonObject["url_to_original"]!!.jsonPrimitive.contentOrNull != null -> {
                         it.jsonObject["url_to_original"]!!.jsonPrimitive.content
@@ -897,6 +903,7 @@ abstract class Luscious(
                         created
                         title
                         url_to_original
+                        url_to_video
                         position
                         thumbnails {
                             url

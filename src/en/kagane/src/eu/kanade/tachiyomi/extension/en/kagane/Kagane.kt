@@ -22,7 +22,6 @@ import eu.kanade.tachiyomi.extension.en.kagane.wv.ProtectionSystemHeaderBox
 import eu.kanade.tachiyomi.extension.en.kagane.wv.parsePssh
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
-import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -75,7 +74,6 @@ class Kagane :
     private val preferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
-        .rateLimit(3)
         .addInterceptor(::refreshTokenInterceptor)
         // fix disk cache
         .apply {
@@ -299,7 +297,7 @@ class Kagane :
                     emptyMap()
                 }
         }
-        val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources) }
+        val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources, preferences.removeTitleExtras) }
         return MangasPage(mangas, hasNextPage = dto.hasNextPage())
     }
 
@@ -326,7 +324,7 @@ class Kagane :
                     null
                 }
         }
-        return dto.toSManga(sourceName, baseUrl, preferences.showEdition, preferences.showSource)
+        return dto.toSManga(sourceName, baseUrl, preferences.showEdition, preferences.showSource, preferences.removeTitleExtras)
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = mangaDetailsRequest(manga.url)
@@ -654,6 +652,9 @@ class Kagane :
     private val SharedPreferences.chapterTitleMode
         get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
+    private val SharedPreferences.removeTitleExtras: Boolean
+        get() = this.getBoolean(REMOVE_TITLE_EXTRAS, false)
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = CONTENT_RATING
@@ -715,6 +716,13 @@ class Kagane :
             setDefaultValue(WVD_DEFAULT)
         }.let(screen::addPreference)
 
+        SwitchPreferenceCompat(screen.context).apply {
+            key = REMOVE_TITLE_EXTRAS
+            title = "Remove extra tags from titles"
+            summary = "Remove bracketed or parenthetical tags (e.g. [mature], (full ver.)) from manga titles"
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+
         ListPreference(screen.context).apply {
             key = CHAPTER_TITLE_MODE
             title = "Chapter title format"
@@ -753,17 +761,21 @@ class Kagane :
         private const val WVD_KEY = "wvd_key"
         private const val WVD_DEFAULT = ""
 
+        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
+
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
-        private const val CHAPTER_TITLE_MODE_DEFAULT = "optional"
+        private const val CHAPTER_TITLE_MODE_DEFAULT = "smart_vol_chapter"
         internal val CHAPTER_TITLE_MODES = arrayOf(
-            "optional",
+            "smart_vol_chapter",
             "always",
             "vol_chapter",
+            "smart",
         )
         internal val CHAPTER_TITLE_MODE_NAMES = arrayOf(
-            "Title only (e.g. 'Manga Title' / 'Ch.5')",
+            "Smart Vol.X Ch.Y + title",
             "Ch.X + title (e.g. 'Ch.5 Manga Title')",
             "Vol.X Ch.Y + title (e.g. 'Vol.1 Ch.5 Manga Title')",
+            "Smart",
         )
     }
 

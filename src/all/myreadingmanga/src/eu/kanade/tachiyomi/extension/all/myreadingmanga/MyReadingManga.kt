@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
 import android.webkit.URLUtil
 import android.widget.Toast
 import androidx.preference.EditTextPreference
@@ -51,7 +54,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         password = preferences.getString(PASSWORD_PREF, "") ?: "",
     )
     private data class Credential(val username: String, val password: String)
-    private var isLoggedIn: Boolean = false
+
+    @Volatile private var isLoggedIn = false
+    private val loginLock = Any()
 
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
@@ -75,11 +80,19 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             return chain.proceed(request)
         }
 
-        if (isLoggedIn) {
-            return chain.proceed(request)
+        if (!isLoggedIn) {
+            synchronized(loginLock) {
+                if (!isLoggedIn) {
+                    performLogin()
+                }
+            }
         }
 
-        try {
+        return chain.proceed(request)
+    }
+
+    private fun performLogin(): Boolean {
+        return try {
             val loginForm = FormBody.Builder()
                 .add("log", credentials.username)
                 .add("pwd", credentials.password)
@@ -89,29 +102,30 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
                 .build()
 
             val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
-            val loginResponse = network.cloudflareClient.newCall(loginRequest).execute()
-
-            if (loginResponse.isSuccessful) {
-                isLoggedIn = true
-                return chain.proceed(request)
-            } else {
-                Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
+            network.cloudflareClient.newCall(loginRequest).execute().use { response ->
+                response.isSuccessful.also { success ->
+                    if (success) {
+                        isLoggedIn = true
+                    } else {
+                        Handler(Looper.getMainLooper()).post {
+                            Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
             }
-            return chain.proceed(request)
         } catch (_: Exception) {
-            return chain.proceed(request)
+            false
         }
     }
 
     // Preference Screen
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        val application = Injekt.get<Application>()
         val usernamePref = EditTextPreference(screen.context).apply {
             key = USERNAME_PREF
             title = "Username"
             summary = "Enter your username"
             setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                isLoggedIn = false
                 true
             }
         }
@@ -119,8 +133,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
             key = PASSWORD_PREF
             title = "Password"
             summary = "Enter your password"
+            setOnBindEditTextListener { et ->
+                et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
             setOnPreferenceChangeListener { _, _ ->
-                Toast.makeText(application, "Restart the app to apply changes", Toast.LENGTH_LONG).show()
+                isLoggedIn = false
                 true
             }
         }
@@ -221,13 +238,16 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         val url = thumbnailUrl.substringBeforeLast("-") + "." + thumbnailUrl.substringAfterLast(".")
         return if (URLUtil.isValidUrl(url)) url else null
     }
+
     private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
+    private val whitespaceRegex = Regex("""\s+""")
     private fun cleanTitle(title: String): String {
-        var cleanedTitle = title.replace(titleRegex, " ").trim()
-        if (cleanedTitle.endsWith(")") && cleanedTitle.lastIndexOf('(') != -1) {
-            cleanedTitle = cleanedTitle.substringBeforeLast("(").trimEnd()
-        }
-        return cleanedTitle.replace(Regex("\\s+"), " ").trim()
+        return title
+            .replace(titleRegex, " ")
+            .trim()
+            .let { if (it.endsWith(")") && it.lastIndexOf('(') != -1) it.substringBeforeLast("(").trimEnd() else it }
+            .replace(whitespaceRegex, " ")
+            .trim()
     }
 
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()

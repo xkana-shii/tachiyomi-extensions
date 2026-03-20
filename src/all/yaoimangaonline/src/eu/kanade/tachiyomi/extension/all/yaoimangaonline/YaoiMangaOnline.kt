@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.extension.all.yaoimangaonline
 
+import android.text.Html
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.Page
@@ -73,9 +74,8 @@ class YaoiMangaOnline : ParsedHttpSource() {
             .selectFirst(".herald-post-thumbnail img")?.attr("src")
         description = document.select(".entry-content > p:not(:has(img)):not(:contains(You need to login))")
             .joinToString("\n\n") {
-                it.html().replace("<br>", "").split("\n").joinToString("\n") { line ->
-                    line.trim()
-                }
+                @Suppress("DEPRECATION")
+                Html.fromHtml(it.html()).toString().trim()
             }
         genre = document.select(".meta-tags > a").joinToString { it.text() }
         author = document.select(".entry-content > p:contains(Mangaka:)").text()

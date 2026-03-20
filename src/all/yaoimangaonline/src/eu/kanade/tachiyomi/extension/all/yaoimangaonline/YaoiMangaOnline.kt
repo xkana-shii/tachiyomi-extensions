@@ -34,8 +34,11 @@ class YaoiMangaOnline : ParsedHttpSource() {
                 .mapNotNull { option ->
                     val value = option.attr("value")
                     val name = option.text().trim()
-                    if (value == "-1" || name.isEmpty()) null
-                    else Pair(name.replace(Regex("\\s*\\(\\d[\\d,]*\\)$"), "").trim(), value)
+                    if (value == "-1" || name.isEmpty()) {
+                        null
+                    } else {
+                        Pair(name.replace(Regex("\\s*\\(\\d[\\d,]*\\)$"), "").trim(), value)
+                    }
                 }
                 .toTypedArray()
 
@@ -47,8 +50,11 @@ class YaoiMangaOnline : ParsedHttpSource() {
                         .trimEnd('/')
                         .substringAfterLast("/tag/")
                         .trimEnd('/')
-                    if (name.isEmpty() || slug.isEmpty()) null
-                    else Pair(name, slug)
+                    if (name.isEmpty() || slug.isEmpty()) {
+                        null
+                    } else {
+                        Pair(name, slug)
+                    }
                 }
                 .toTypedArray()
 

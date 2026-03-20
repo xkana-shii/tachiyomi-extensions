@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.extension.all.nhentai
 
 import android.content.SharedPreferences
+import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getArtists
 import eu.kanade.tachiyomi.extension.all.nhentai.NHUtils.getGroups
@@ -342,5 +343,6 @@ open class NHentai(
 
     companion object {
         const val PREFIX_ID_SEARCH = "id:"
+        private const val TITLE_PREF = "Display manga title as:"
     }
 }

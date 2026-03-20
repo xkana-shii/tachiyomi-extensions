@@ -166,40 +166,22 @@ class Mangago :
         Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
-        val originalTitle = document.selectFirst(".w-title h1")!!.text()
         val matches = mutableListOf<String>()
 
-        title = originalTitle
-            .let { t ->
-                if (isRemoveTitleVersion()) {
-                    var s = t
-                    while (titleRegex.containsMatchIn(s)) {
-                        val match = titleRegex.find(s)!!
-                        matches.add(match.value)
-                        s = s.replace(match.value, "").trim()
-                    }
-                    s
-                } else {
-                    t
-                }
-            }
-            .let { t ->
-                val pattern = customRemoveTitle()
-                if (pattern.isNotEmpty()) {
-                    val regex = Regex(pattern, RegexOption.IGNORE_CASE)
-                    regex.findAll(t).forEach { matches.add(it.value) }
-                    regex.replace(t, "").trim()
-                } else {
-                    t
-                }
-            }
+        fun String.applyRegexRemoval(regex: Regex) = regex.findAll(this)
+            .onEach { matches.add(it.value) }
+            .fold(this) { acc, m -> acc.replace(m.value, "").trim() }
+
+        title = document.selectFirst(".w-title h1")!!.text()
+            .let { if (isRemoveTitleVersion()) it.applyRegexRemoval(titleRegex) else it }
+            .let { customRemoveTitle().takeIf { p -> p.isNotEmpty() }
+                ?.let { p -> it.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE)) } ?: it }
 
         document.getElementById("information")!!.let { info ->
             thumbnail_url = info.selectFirst("img")!!.attr("abs:src")
-
-            var altTitles = ""
             description = info.selectFirst(".manga_summary")?.apply { selectFirst("font")?.remove() }?.text()
 
+            var altTitles = ""
             info.select(".manga_info li, .manga_right tr").forEach { el ->
                 when (el.selectFirst("b, label")!!.text().lowercase()) {
                     "alternative:" -> altTitles = el.text().substringAfter(":").trim()
@@ -214,23 +196,20 @@ class Mangago :
             }
 
             val parsedAltTitles = altTitles
-                .takeUnless { it.isBlank() || it.equals("none", ignoreCase = true) || it.equals("N/A", ignoreCase = true) }
+                .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("N/A", true) }
                 ?.let { t ->
-                    val cleaned = if (t.contains(';')) {
-                        t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
-                    } else {
-                        t.trimEnd(',').split(Regex("\\s*,\\s*"))
-                    }
-                    cleaned.map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
+                    (if (t.contains(';')) t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
+                    else t.trimEnd(',').split(Regex("\\s*,\\s*")))
+                        .filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
                 }
 
-            matches.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
+            matches.removeAll { it.trim().equals("(Yaoi)", true) }
 
             description = buildString {
-                append(description)
-                if (!parsedAltTitles.isNullOrEmpty()) append("\n\n----\n#### **Alternative Titles**\n$parsedAltTitles")
+                description?.let(::append)
+                parsedAltTitles?.let { append("\n\n----\n#### **Alternative Titles**\n$it") }
                 if (matches.isNotEmpty()) append("\n\n----\n#### **Removed from title**\n${matches.joinToString("") { "- `$it`\n" }}")
-            }.trim()
+            }.trim().ifEmpty { null }
         }
     }
 

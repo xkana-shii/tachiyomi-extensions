@@ -88,10 +88,8 @@ class AlternateSeries(
 class DetailsDto(
     val title: String,
     val description: String?,
-    @SerialName("publication_status")
-    val publicationStatus: String,
     @SerialName("upload_status")
-    val uploadStatus: String,
+    val publicationStatus: String,
     val format: String?,
     @SerialName("source_id")
     val sourceId: String?,
@@ -103,6 +101,8 @@ class DetailsDto(
     val seriesAlternateTitles: List<AlternateTitle> = emptyList(),
     @SerialName("series_books")
     val seriesBooks: List<ChapterDto.Book> = emptyList(),
+    @SerialName("edition_info")
+    val editionInfo: String? = null,
 ) {
     @Serializable
     class SeriesStaff(
@@ -128,7 +128,10 @@ class DetailsDto(
         val label: String?,
     )
 
-    fun toSManga(sourceName: String? = null, removeExtras: Boolean = false): SManga = SManga.create().apply {
+    fun toSManga(sourceName: String? = null, baseUrl: String = "", showEdition: Boolean = false, showSource: Boolean = false): SManga = SManga.create().apply {
+        val base = this@DetailsDto.title.trim()
+        val withEdition = if (showEdition && !this@DetailsDto.editionInfo.isNullOrBlank()) "$base (${this@DetailsDto.editionInfo})" else base
+        title = if (showSource && sourceName != null) "$withEdition [$sourceName]" else withEdition
         val desc = StringBuilder()
 
         // Add main description
@@ -173,7 +176,7 @@ class DetailsDto(
         "ONGOING" -> SManga.ONGOING
         "COMPLETED" -> SManga.COMPLETED
         "HIATUS" -> SManga.ON_HIATUS
-        "CANCELLED" -> SManga.CANCELLED
+        "ABANDONED" -> SManga.CANCELLED
         else -> SManga.UNKNOWN
     }
 }
@@ -215,63 +218,33 @@ class ChapterDto(
         private fun buildChapterName(mode: String = "smart"): String {
             val trimmedTitle = title.trim()
             return when (mode) {
-                "never" -> trimmedTitle
+                "optional" -> {
+                    when {
+                        trimmedTitle.isEmpty() && !chapterNo.isNullOrBlank() -> "Ch.$chapterNo"
+                        else -> trimmedTitle
+                    }
+                }
 
                 "always" -> {
                     when {
                         chapterNo.isNullOrBlank() -> trimmedTitle
-                        trimmedTitle.isEmpty() -> "Chapter $chapterNo"
-                        else -> "Chapter $chapterNo: $trimmedTitle"
+                        trimmedTitle.isEmpty() -> "Ch.$chapterNo"
+                        else -> "Ch.$chapterNo $trimmedTitle"
                     }
                 }
 
-                else -> {
-                    if (chapterNo.isNullOrBlank()) return trimmedTitle
-                    if (trimmedTitle.isEmpty()) return "Chapter $chapterNo"
-
-                    val keywords = listOf("hiatus", "special episode", "season", "special", "finale", "bonus", "romantasy au", "historical au", "side story", "creator's note", "scheduled break")
-                    for (kw in keywords) {
-                        if (trimmedTitle.contains(kw, ignoreCase = true)) return trimmedTitle
-                    }
-                    return when {
-                        trimmedTitle.matches(
-                            Regex(
-                                "^\\(S\\d+\\)\\s*(Chapter|Episode|Ch|Ep).*",
-                                RegexOption.IGNORE_CASE,
-                            ),
-                        ) -> trimmedTitle
-
-                        trimmedTitle.matches(
-                            Regex(
-                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*${Regex.escape(chapterNo)}(?:[\\s\\-:.].*|\$)",
-                                RegexOption.IGNORE_CASE,
-                            ),
-                        ) -> trimmedTitle
-
-                        trimmedTitle.matches(
-                            Regex(
-                                "^(Chapter|Ch\\.|Ch|Episode|Ep\\.|Ep)\\s*\\d+.*",
-                                RegexOption.IGNORE_CASE,
-                            ),
-                        ) -> trimmedTitle
-
-                        else -> {
-                            val leadingNumberRegex = Regex("^\\s*(\\d+)(?:[\\.:\\-\\s].*|\$)")
-                            val leadingMatch = leadingNumberRegex.find(trimmedTitle)
-                            if (leadingMatch != null) {
-                                val leadingNum = leadingMatch.groupValues[1]
-                                val leadingInt = leadingNum.toIntOrNull()
-                                val chapterInt = chapterNo?.toIntOrNull()
-                                if (leadingInt != null && chapterInt != null) {
-                                    if (leadingInt == chapterInt) return trimmedTitle
-                                } else {
-                                    if (leadingNum == chapterNo) return trimmedTitle
-                                }
-                            }
-                            "Chapter $chapterNo: $trimmedTitle"
-                        }
+                "vol_chapter" -> {
+                    val volPart = if (!volumeNo.isNullOrBlank()) "Vol.$volumeNo " else ""
+                    val chPart = if (!chapterNo.isNullOrBlank()) "Ch.$chapterNo" else ""
+                    val numPart = "$volPart$chPart".trim()
+                    when {
+                        numPart.isEmpty() -> trimmedTitle
+                        trimmedTitle.isEmpty() -> numPart
+                        else -> "$numPart $trimmedTitle"
                     }
                 }
+
+                else -> trimmedTitle
             }
         }
     }

@@ -19,20 +19,16 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
-import keiyoushi.lib.randomua.addRandomUAPreferenceToScreen
-import keiyoushi.lib.randomua.getPrefCustomUA
-import keiyoushi.lib.randomua.getPrefUAType
+import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.getPreferencesLazy
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import uy.kohesive.injekt.api.get
 
 open class Hentai3(
     override val lang: String = "all",
@@ -47,19 +43,12 @@ open class Hentai3(
 
     override val supportsLatest = true
 
-    override val client: OkHttpClient by lazy {
-        network.cloudflareClient.newBuilder()
-            .setRandomUserAgent(
-                userAgentType = preferences.getPrefUAType(),
-                customUA = preferences.getPrefCustomUA(),
-                filterInclude = listOf("chrome"),
-            )
-            .build()
-    }
-
     override fun headersBuilder() = super.headersBuilder()
         .set("referer", "$baseUrl/")
         .set("origin", baseUrl)
+        .setRandomUserAgent(
+            filterInclude = listOf("chrome"),
+        )
 
     private val preferences by getPreferencesLazy()
 
@@ -89,7 +78,7 @@ open class Hentai3(
             }
         }.also(screen::addPreference)
 
-        addRandomUAPreferenceToScreen(screen)
+        screen.addRandomUAPreference()
     }
 
     /* Popular */
@@ -180,7 +169,7 @@ open class Hentai3(
         }
 
         val url = searchURL.toHttpUrl().newBuilder().apply {
-            addQueryParameter("q", if (queries.isNotEmpty()) queries else "pages:>0")
+            addQueryParameter("q", queries.ifEmpty { "pages:>0" })
             addQueryParameter("page", offsetPage.toString())
             filterList.findInstance<SortFilter>()?.let { f ->
                 addQueryParameter("sort", f.toUriPart())
@@ -235,6 +224,8 @@ open class Hentai3(
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
     /* Details */
+
+    override fun getMangaUrl(manga: SManga) = "$baseUrl${manga.url}"
 
     override fun mangaDetailsParse(document: Document): SManga {
         val fullTitle = document.select("#main-info > h1").text().replace("\"", "").trim()

@@ -174,8 +174,10 @@ class Mangago :
 
         title = document.selectFirst(".w-title h1")!!.text()
             .let { if (isRemoveTitleVersion()) it.applyRegexRemoval(titleRegex) else it }
-            .let { customRemoveTitle().takeIf { p -> p.isNotEmpty() }
-                ?.let { p -> it.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE)) } ?: it }
+            .let {
+                customRemoveTitle().takeIf { p -> p.isNotEmpty() }
+                    ?.let { p -> it.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE)) } ?: it
+            }
 
         document.getElementById("information")!!.let { info ->
             thumbnail_url = info.selectFirst("img")!!.attr("abs:src")
@@ -198,8 +200,13 @@ class Mangago :
             val parsedAltTitles = altTitles
                 .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("N/A", true) }
                 ?.let { t ->
-                    (if (t.contains(';')) t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
-                    else t.trimEnd(',').split(Regex("\\s*,\\s*")))
+                    (
+                        if (t.contains(';')) {
+                            t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
+                        } else {
+                            t.trimEnd(',').split(Regex("\\s*,\\s*"))
+                        }
+                        )
                         .filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
                 }
 

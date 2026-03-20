@@ -91,31 +91,29 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
         return chain.proceed(request)
     }
 
-    private fun performLogin(): Boolean {
-        return try {
-            val loginForm = FormBody.Builder()
-                .add("log", credentials.username)
-                .add("pwd", credentials.password)
-                .add("wp-submit", "Log In")
-                .add("redirect_to", "$baseUrl/")
-                .add("testcookie", "1")
-                .build()
+    private fun performLogin(): Boolean = try {
+        val loginForm = FormBody.Builder()
+            .add("log", credentials.username)
+            .add("pwd", credentials.password)
+            .add("wp-submit", "Log In")
+            .add("redirect_to", "$baseUrl/")
+            .add("testcookie", "1")
+            .build()
 
-            val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
-            network.cloudflareClient.newCall(loginRequest).execute().use { response ->
-                response.isSuccessful.also { success ->
-                    if (success) {
-                        isLoggedIn = true
-                    } else {
-                        Handler(Looper.getMainLooper()).post {
-                            Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
-                        }
+        val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
+        network.cloudflareClient.newCall(loginRequest).execute().use { response ->
+            response.isSuccessful.also { success ->
+                if (success) {
+                    isLoggedIn = true
+                } else {
+                    Handler(Looper.getMainLooper()).post {
+                        Toast.makeText(Injekt.get<Application>(), "MyReadingManga login failed. Please check your credentials.", Toast.LENGTH_LONG).show()
                     }
                 }
             }
-        } catch (_: Exception) {
-            false
         }
+    } catch (_: Exception) {
+        false
     }
 
     // Preference Screen
@@ -241,14 +239,12 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
     private val whitespaceRegex = Regex("""\s+""")
-    private fun cleanTitle(title: String): String {
-        return title
-            .replace(titleRegex, " ")
-            .trim()
-            .let { if (it.endsWith(")") && it.lastIndexOf('(') != -1) it.substringBeforeLast("(").trimEnd() else it }
-            .replace(whitespaceRegex, " ")
-            .trim()
-    }
+    private fun cleanTitle(title: String): String = title
+        .replace(titleRegex, " ")
+        .trim()
+        .let { if (it.endsWith(")") && it.lastIndexOf('(') != -1) it.substringBeforeLast("(").trimEnd() else it }
+        .replace(whitespaceRegex, " ")
+        .trim()
 
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()
 

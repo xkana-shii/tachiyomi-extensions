@@ -22,6 +22,7 @@ import eu.kanade.tachiyomi.extension.en.kagane.wv.ProtectionSystemHeaderBox
 import eu.kanade.tachiyomi.extension.en.kagane.wv.parsePssh
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.POST
+import eu.kanade.tachiyomi.network.interceptor.rateLimit
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -74,6 +75,7 @@ class Kagane :
     private val preferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
+        .rateLimit(3)
         .addInterceptor(::refreshTokenInterceptor)
         // fix disk cache
         .apply {
@@ -652,9 +654,6 @@ class Kagane :
     private val SharedPreferences.chapterTitleMode
         get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
-    private val SharedPreferences.removeTitleExtras: Boolean
-        get() = this.getBoolean(REMOVE_TITLE_EXTRAS, false)
-
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = CONTENT_RATING
@@ -704,13 +703,6 @@ class Kagane :
         }.let(screen::addPreference)
 
         SwitchPreferenceCompat(screen.context).apply {
-            key = REMOVE_TITLE_EXTRAS
-            title = "Remove extra tags from titles"
-            summary = "Remove bracketed or parenthetical tags (e.g. [mature], (full ver.)) from manga titles when available"
-            setDefaultValue(false)
-        }.let(screen::addPreference)
-
-        SwitchPreferenceCompat(screen.context).apply {
             key = DATA_SAVER
             title = "Data saver"
             setDefaultValue(false)
@@ -728,7 +720,7 @@ class Kagane :
             title = "Chapter title format"
             entries = CHAPTER_TITLE_MODE_NAMES
             entryValues = CHAPTER_TITLE_MODES
-            summary = "%s"
+            summary = "How the chapter title should be displayed"
             setDefaultValue(CHAPTER_TITLE_MODE_DEFAULT)
         }.let(screen::addPreference)
     }
@@ -761,12 +753,10 @@ class Kagane :
         private const val WVD_KEY = "wvd_key"
         private const val WVD_DEFAULT = ""
 
-        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
-
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
-        private const val CHAPTER_TITLE_MODE_DEFAULT = "smart"
+        private const val CHAPTER_TITLE_MODE_DEFAULT = "optional"
         internal val CHAPTER_TITLE_MODES = arrayOf(
-            "smart",
+            "optional",
             "always",
             "vol_chapter",
         )
@@ -789,63 +779,7 @@ class Kagane :
                 .build()
         }.build()
 
-    private val metadataBlockingClient = metadataClient.newBuilder()
-        .connectTimeout(850, TimeUnit.MILLISECONDS)
-        .readTimeout(850, TimeUnit.MILLISECONDS)
-        .writeTimeout(850, TimeUnit.MILLISECONDS)
-        .callTimeout(1000, TimeUnit.MILLISECONDS)
-        .build()
-
-    private fun fetchMetadataBlocking() {
-        if (metadata != null) return
-
-        val start = System.currentTimeMillis()
-        try {
-            val genreResponse = metadataBlockingClient.newCall(
-                GET("$apiUrl/api/v2/genres/list", apiHeaders),
-            ).execute()
-
-            val tagsResponse = metadataBlockingClient.newCall(
-                GET("$apiUrl/api/v2/tags/list", apiHeaders),
-            ).execute()
-
-            val sourcesResponse = metadataBlockingClient.newCall(
-                POST(
-                    "$apiUrl/api/v2/sources/list",
-                    apiHeaders,
-                    buildJsonObject { put("source_types", null) }.toJsonString()
-                        .toRequestBody("application/json".toMediaType()),
-                ),
-            ).execute()
-
-            if (genreResponse.isSuccessful && tagsResponse.isSuccessful && sourcesResponse.isSuccessful) {
-                val genres = genreResponse.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
-                val tags = tagsResponse.parseAs<List<TagDto>>().associate { it.id to it.tagName }
-                val sources = sourcesResponse.parseAs<SourcesDto>().sources
-
-                metadata = MetadataDto(genres, tags, sources)
-
-                val tookMs = System.currentTimeMillis() - start
-                Log.d(name, "Metadata fetched and updated (blocking, took ${tookMs}ms)")
-            } else {
-                val tookMs = System.currentTimeMillis() - start
-                Log.e(name, "Failed to fetch metadata (blocking): One or more requests failed (took ${tookMs}ms)")
-            }
-
-            genreResponse.close()
-            tagsResponse.close()
-            sourcesResponse.close()
-        } catch (e: Exception) {
-            val tookMs = System.currentTimeMillis() - start
-            Log.e(name, "Failed to fetch metadata (blocking, took ${tookMs}ms)", e)
-        }
-    }
-
     override fun getFilterList(): FilterList {
-        if (metadata == null) {
-            fetchMetadataBlocking()
-        }
-
         val filters: MutableList<Filter<*>> = mutableListOf(
             SortFilter(),
             ContentRatingFilter(
@@ -892,7 +826,6 @@ class Kagane :
 
     private fun fetchMetadata() {
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            val start = System.currentTimeMillis()
             try {
                 val genreResponse = metadataClient.newCall(
                     GET("$apiUrl/api/v2/genres/list", apiHeaders),
@@ -915,15 +848,12 @@ class Kagane :
                     val sources = sourcesResponse.parseAs<SourcesDto>().sources
 
                     metadata = MetadataDto(genres, tags, sources)
-                    val tookMs = System.currentTimeMillis() - start
-                    Log.d(name, "Metadata fetched and updated (took ${tookMs}ms)")
+                    Log.d(name, "Metadata fetched and updated")
                 } else {
-                    val tookMs = System.currentTimeMillis() - start
-                    Log.e(name, "Failed to fetch metadata: One or more requests failed (took ${tookMs}ms)")
+                    Log.e(name, "Failed to fetch metadata: One or more requests failed")
                 }
             } catch (e: Exception) {
-                val tookMs = System.currentTimeMillis() - start
-                Log.e(name, "Failed to fetch metadata (took ${tookMs}ms)", e)
+                Log.e(name, "Failed to fetch metadata", e)
             }
         }
     }

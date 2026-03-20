@@ -77,11 +77,27 @@ class YaoiMangaOnline : ParsedHttpSource() {
                 @Suppress("DEPRECATION")
                 Html.fromHtml(it.html()).toString().trim()
             }
+            .let { text ->
+                val languageIndex = text.indexOf("Language:", ignoreCase = true)
+                if (languageIndex != -1) {
+                    text.substring(text.indexOf('\n', languageIndex).takeIf { it != -1 } ?: text.length)
+                } else {
+                    text
+                }
+            }
+            .trim()
         genre = document.select(".meta-tags > a").joinToString { it.text() }
-        author = document.select(".entry-content > p:contains(Mangaka:)").text()
-            .substringAfter("Mangaka:")
+        author = document.select(".entry-content > p:matches((?i)(Author|Mangaka):)")
+            .text()
+            .replace(Regex("(?i)(Author|Mangaka):"), "")
             .substringBefore("Language:")
             .trim()
+        status = when {
+            document.selectFirst(".meta-category a[href*='/ongoing/']") != null -> SManga.ONGOING
+            document.selectFirst(".meta-category a[href*='/completed/']") != null -> SManga.COMPLETED
+            document.selectFirst(".meta-category a[href*='/hiatus/']") != null -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
     }
 
     override fun chapterListSelector() = ".mpp-toc a"

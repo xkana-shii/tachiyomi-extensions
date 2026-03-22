@@ -135,12 +135,6 @@ class DetailsDto(
             desc.append("\n")
         }
 
-        // Add source name
-        if (sourceName != null && this@DetailsDto.sourceId != null) {
-            if (desc.isNotEmpty()) desc.append("\n")
-            desc.append("Source: [$sourceName]($baseUrl/sources/${this@DetailsDto.sourceId})\n")
-        }
-
         // Add alternate titles at the end
         if (seriesAlternateTitles.isNotEmpty()) {
             if (desc.isNotEmpty()) desc.append("\n")

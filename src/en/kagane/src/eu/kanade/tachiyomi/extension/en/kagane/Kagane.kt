@@ -118,39 +118,46 @@ class Kagane :
 
     // ============================== Popular ===============================
 
-    override fun popularMangaRequest(page: Int) = searchMangaRequest(
-        page,
-        "",
-        FilterList(
-            SortFilter(Filter.Sort.Selection(1, false)),
-            ContentRatingFilter(
-                preferences.contentRating.toSet(),
+    override fun popularMangaRequest(page: Int): Request {
+        ensureMetadataSync()
+        return searchMangaRequest(
+            page,
+            "",
+            FilterList(
+                SortFilter(Filter.Sort.Selection(1, false)),
+                ContentRatingFilter(
+                    preferences.contentRating.toSet(),
+                ),
+                GenresFilter(emptyList()),
             ),
-            GenresFilter(emptyList()),
-        ),
-    )
+        )
+    }
 
     override fun popularMangaParse(response: Response) = searchMangaParse(response)
 
     // =============================== Latest ===============================
 
-    override fun latestUpdatesRequest(page: Int) = searchMangaRequest(
-        page,
-        "",
-        FilterList(
-            SortFilter(Filter.Sort.Selection(6, false)),
-            ContentRatingFilter(
-                preferences.contentRating.toSet(),
+    override fun latestUpdatesRequest(page: Int): Request {
+        ensureMetadataSync()
+        return searchMangaRequest(
+            page,
+            "",
+            FilterList(
+                SortFilter(Filter.Sort.Selection(6, false)),
+                ContentRatingFilter(
+                    preferences.contentRating.toSet(),
+                ),
+                GenresFilter(emptyList()),
             ),
-            GenresFilter(emptyList()),
-        ),
-    )
+        )
+    }
 
     override fun latestUpdatesParse(response: Response) = searchMangaParse(response)
 
     // =============================== Search ===============================
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        ensureMetadataSync()
         val body = buildJsonObject {
             if (query.isNotBlank()) {
                 put("title", query)
@@ -792,6 +799,8 @@ class Kagane :
         }.build()
 
     override fun getFilterList(): FilterList {
+        ensureMetadataSync()
+
         val filters: MutableList<Filter<*>> = mutableListOf(
             SortFilter(),
             ContentRatingFilter(
@@ -801,8 +810,6 @@ class Kagane :
             PublicationStatusFilter(),
             Filter.Separator(),
         )
-
-        fetchMetadata()
 
         val meta = metadata
 
@@ -834,6 +841,40 @@ class Kagane :
         }
 
         return FilterList(filters)
+    }
+
+    private fun ensureMetadataSync() {
+        if (metadata != null) return
+
+        try {
+            val genreResponse = metadataClient.newCall(
+                GET("$apiUrl/api/v2/genres/list", apiHeaders),
+            ).execute()
+            val tagsResponse = metadataClient.newCall(
+                GET("$apiUrl/api/v2/tags/list", apiHeaders),
+            ).execute()
+            val sourcesResponse = metadataClient.newCall(
+                POST(
+                    "$apiUrl/api/v2/sources/list",
+                    apiHeaders,
+                    buildJsonObject { put("source_types", null) }.toJsonString()
+                        .toRequestBody("application/json".toMediaType()),
+                ),
+            ).execute()
+
+            if (genreResponse.isSuccessful && tagsResponse.isSuccessful && sourcesResponse.isSuccessful) {
+                val genres = genreResponse.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
+                val tags = tagsResponse.parseAs<List<TagDto>>().associate { it.id to it.tagName }
+                val sources = sourcesResponse.parseAs<SourcesDto>().sources
+
+                metadata = MetadataDto(genres, tags, sources)
+                Log.d(name, "Metadata synchronously fetched and updated")
+            } else {
+                Log.e(name, "Failed to synchronously fetch metadata: One or more requests failed")
+            }
+        } catch (e: Exception) {
+            Log.e(name, "Failed to synchronously fetch metadata", e)
+        }
     }
 
     private fun fetchMetadata() {

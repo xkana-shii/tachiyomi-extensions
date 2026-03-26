@@ -23,6 +23,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONObject
 import rx.Observable
 
 class Cubari(override val lang: String) : HttpSource() {
@@ -216,6 +217,14 @@ class Cubari(override val lang: String) : HttpSource() {
                 }
         }
 
+        query.startsWith("github:") -> {
+            Observable.fromCallable {
+                val mangasPage = githubRepoMangaList(query.removePrefix("github:").trim())
+                require(mangasPage.mangas.isNotEmpty()) { "No .json files found in the specified GitHub repository." }
+                mangasPage
+            }
+        }
+
         else -> {
             client.newBuilder()
                 .addInterceptor(RemoteStorageUtils.HomeInterceptor())
@@ -233,6 +242,55 @@ class Cubari(override val lang: String) : HttpSource() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = GET("$baseUrl/", cubariHeaders)
+
+    private fun githubRepoMangaList(repo: String): MangasPage {
+        val branch = "master"
+        val treeUrl = "https://api.github.com/repos/$repo/git/trees/$branch?recursive=1"
+
+        val treeResp = client.newCall(
+            Request.Builder()
+                .url(treeUrl)
+                .header("Accept", "application/vnd.github+json")
+                .build(),
+        ).execute()
+
+        val jsonFiles: List<String> = if (treeResp.isSuccessful) {
+            val tree = JSONObject(treeResp.body?.string() ?: "").getJSONArray("tree")
+            (0 until tree.length())
+                .map { tree.getJSONObject(it) }
+                .filter { it.getString("type") == "blob" && it.getString("path").endsWith(".json") }
+                .map { it.getString("path") }
+        } else {
+            emptyList()
+        }
+
+        val requiredKeys = listOf("title", "description", "artist", "author")
+        val validMangaList = jsonFiles.mapNotNull { path ->
+            val rawUrl = "https://raw.githubusercontent.com/$repo/$branch/$path"
+            runCatching {
+                val resp = client.newCall(Request.Builder().url(rawUrl).build()).execute()
+                if (!resp.isSuccessful) return@mapNotNull null
+                val json = JSONObject(resp.body?.string() ?: return@mapNotNull null)
+                if (!requiredKeys.all { json.has(it) }) return@mapNotNull null
+
+                val displayTitle = json.optString("title").takeIf { it.isNotBlank() }
+                    ?: path.substringAfterLast("/").removeSuffix(".json")
+                val gistBase64 = Base64.encodeToString(
+                    "raw/$repo/$branch/$path".toByteArray(),
+                    Base64.NO_PADDING or Base64.NO_WRAP,
+                )
+
+                SManga.create().apply {
+                    title = displayTitle
+                    url = "/read/gist/$gistBase64"
+                    description = "GitHub: $repo\nPath: $path"
+                    thumbnail_url = json.optString("cover", "")
+                }
+            }.getOrNull()
+        }
+
+        return MangasPage(validMangaList, false)
+    }
 
     private fun deepLinkHandler(query: String): Pair<String, String> = if (query.startsWith("cubari:")) { // legacy cubari:source/slug format
         val queryFragments = query.substringAfter("cubari:").split("/", limit = 2)
@@ -371,7 +429,7 @@ class Cubari(override val lang: String) : HttpSource() {
         author = jsonObj["author"]?.jsonPrimitive?.content ?: AUTHOR_FALLBACK
 
         val descriptionFull = jsonObj["description"]?.jsonPrimitive?.content
-        description = descriptionFull?.substringBefore("Tags: ") ?: DESCRIPTION_FALLBACK
+        description = descriptionFull?.substringBefore("Status: ")?.trim() ?: DESCRIPTION_FALLBACK
         genre = descriptionFull?.let {
             if (it.contains("Tags: ")) {
                 it.substringAfter("Tags: ")
@@ -379,6 +437,15 @@ class Cubari(override val lang: String) : HttpSource() {
                 ""
             }
         } ?: ""
+        status = when {
+            descriptionFull?.contains("Status: Completed", ignoreCase = true) == true -> SManga.COMPLETED
+            descriptionFull?.contains("Status: Ongoing", ignoreCase = true) == true -> SManga.ONGOING
+            descriptionFull?.contains("Status: Licensed", ignoreCase = true) == true -> SManga.LICENSED
+            descriptionFull?.contains("Status: Publishing Finished", ignoreCase = true) == true -> SManga.PUBLISHING_FINISHED
+            descriptionFull?.contains("Status: Cancelled", ignoreCase = true) == true -> SManga.CANCELLED
+            descriptionFull?.contains("Status: On Hiatus", ignoreCase = true) == true -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
 
         url = mangaReference?.url ?: jsonObj["url"]!!.jsonPrimitive.content
         thumbnail_url = jsonObj["coverUrl"]?.jsonPrimitive?.content

@@ -1,9 +1,0 @@
-ext {
-    kmkVersionCode = 1
-    extName = 'E-Hentai'
-    extClass = '.EHFactory'
-    extVersionCode = 27
-    isNsfw = true
-}
-
-apply from: "$rootDir/common.gradle"

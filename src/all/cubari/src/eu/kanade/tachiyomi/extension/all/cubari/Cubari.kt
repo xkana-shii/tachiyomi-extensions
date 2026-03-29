@@ -1,18 +1,25 @@
 package eu.kanade.tachiyomi.extension.all.cubari
 
 import android.os.Build
+import android.text.InputType
 import android.util.Base64
+import androidx.preference.EditTextPreference
+import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.AppInfo
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservable
 import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
+import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -26,7 +33,9 @@ import okhttp3.Response
 import org.json.JSONObject
 import rx.Observable
 
-class Cubari(override val lang: String) : HttpSource() {
+class Cubari(override val lang: String) :
+    HttpSource(),
+    ConfigurableSource {
 
     override val name = "Cubari"
 
@@ -34,12 +43,32 @@ class Cubari(override val lang: String) : HttpSource() {
 
     override val supportsLatest = true
 
+    private val preferences by getPreferencesLazy()
+
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val headers = request.headers.newBuilder()
+            val headersBuilder = request.headers.newBuilder()
                 .removeAll("Accept-Encoding")
-                .build()
+
+            // Add Authorization header for GitHub hosts when token is set in preferences
+            val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
+            if (token.isNotBlank()) {
+                val host = request.url.host
+                if (
+                    host == "api.github.com" ||
+                    host == "raw.githubusercontent.com" ||
+                    host == "user-images.githubusercontent.com" ||
+                    host == "gist.githubusercontent.com" ||
+                    host == "raw.github.com" ||
+                    host.endsWith("githubusercontent.com") ||
+                    host.endsWith("github.com")
+                ) {
+                    headersBuilder.set("Authorization", "token $token")
+                }
+            }
+
+            val headers = headersBuilder.build()
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .build()
@@ -156,7 +185,9 @@ class Cubari(override val lang: String) : HttpSource() {
                 jsonEl.jsonPrimitive.content
             }
 
-            Page(i, "", page)
+            // If the URL points to GitHub-hosted content, return a proxy URL that will be handled lazily by getImage
+            val finalUrl = proxyUrlIfGithubHost(page)
+            Page(i, "", finalUrl)
         }
     }
 
@@ -190,11 +221,83 @@ class Cubari(override val lang: String) : HttpSource() {
                 jsonEl.jsonPrimitive.content
             }
 
-            Page(i, "", page)
+            val finalUrl = proxyUrlIfGithubHost(page)
+            Page(i, "", finalUrl)
         }
     }
 
     override fun pageListParse(response: Response): List<Page> = throw UnsupportedOperationException()
+
+    /**
+     * Replace GitHub-hosted HTTP URLs with a cubari://proxy/<base64> URL that will be handled lazily in getImage.
+     * If the URL is not a GitHub host, return it unchanged.
+     */
+    private fun proxyUrlIfGithubHost(url: String): String {
+        if (url.isBlank()) return url
+
+        val parsed = try {
+            url.toHttpUrl()
+        } catch (e: Exception) {
+            return url
+        }
+
+        val host = parsed.host.lowercase()
+        val isGithubHost = host == "github.com" ||
+            host.endsWith("github.com") ||
+            host == "raw.githubusercontent.com" ||
+            host == "user-images.githubusercontent.com" ||
+            host == "gist.githubusercontent.com" ||
+            host.endsWith("githubusercontent.com")
+
+        if (!isGithubHost) return url
+
+        val encoded = Base64.encodeToString(url.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP)
+        return "cubari://proxy/$encoded"
+    }
+
+    /**
+     * Intercept image fetches. If the image URL is our cubari://proxy/... scheme, decode and fetch the original image
+     * using the extension's client (which will add Authorization when token is set). Falls back to an unauthenticated
+     * fetch using the app global client if the authenticated fetch fails.
+     *
+     * This overrides HttpSource.getImage(page) so network operations are dispatched to IO.
+     */
+    override suspend fun getImage(page: Page): Response = withContext(Dispatchers.IO) {
+        val imageUrl = page.imageUrl ?: throw IllegalArgumentException("imageUrl is null")
+
+        if (imageUrl.startsWith("cubari://proxy/")) {
+            val encoded = imageUrl.removePrefix("cubari://proxy/")
+            val originalUrl = try {
+                String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP))
+            } catch (e: Exception) {
+                // If decoding fails, propagate an error so the caller can handle it.
+                throw IllegalArgumentException("Invalid proxy URL")
+            }
+
+            // First attempt: use extension client (authenticated for GitHub hosts)
+            val req = Request.Builder()
+                .url(originalUrl)
+                .get()
+                .build()
+
+            try {
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    return@withContext resp
+                } else {
+                    resp.close()
+                }
+            } catch (_: Exception) {
+                // ignore and fall through to unauthenticated attempt
+            }
+
+            // Fallback: try unauthenticated using app global client
+            return@withContext network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
+        }
+
+        // Non-proxy URLs: let the app/global client fetch it as normal
+        return@withContext network.client.newCall(Request.Builder().url(imageUrl).get().build()).execute()
+    }
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
         // handle direct links or old cubari:source/id format
@@ -247,12 +350,16 @@ class Cubari(override val lang: String) : HttpSource() {
         val branch = "master"
         val treeUrl = "https://api.github.com/repos/$repo/git/trees/$branch?recursive=1"
 
-        val treeResp = client.newCall(
-            Request.Builder()
-                .url(treeUrl)
-                .header("Accept", "application/vnd.github+json")
-                .build(),
-        ).execute()
+        val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
+
+        val treeReqBuilder = Request.Builder()
+            .url(treeUrl)
+            .header("Accept", "application/vnd.github+json")
+        if (token.isNotEmpty()) {
+            treeReqBuilder.header("Authorization", "token $token")
+        }
+
+        val treeResp = client.newCall(treeReqBuilder.build()).execute()
 
         val jsonFiles: List<String> = if (treeResp.isSuccessful) {
             val tree = JSONObject(treeResp.body?.string() ?: "").getJSONArray("tree")
@@ -268,7 +375,11 @@ class Cubari(override val lang: String) : HttpSource() {
         val validMangaList = jsonFiles.mapNotNull { path ->
             val rawUrl = "https://raw.githubusercontent.com/$repo/$branch/$path"
             runCatching {
-                val resp = client.newCall(Request.Builder().url(rawUrl).build()).execute()
+                val rawReqBuilder = Request.Builder().url(rawUrl)
+                if (token.isNotEmpty()) {
+                    rawReqBuilder.header("Authorization", "token $token")
+                }
+                val resp = client.newCall(rawReqBuilder.build()).execute()
                 if (!resp.isSuccessful) return@mapNotNull null
                 val json = JSONObject(resp.body?.string() ?: return@mapNotNull null)
                 if (!requiredKeys.all { json.has(it) }) return@mapNotNull null
@@ -456,11 +567,25 @@ class Cubari(override val lang: String) : HttpSource() {
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        EditTextPreference(screen.context).apply {
+            key = PREF_GITHUB_TOKEN
+            title = "GitHub Personal Access Token"
+            summary = "Optional. Use to increase GitHub API rate limit for repository searches and authenticated fetches."
+            dialogMessage = "Enter a GitHub personal access token (no special scopes needed for public repo reads). Token is stored locally and used only for API/raw/image requests made by this extension."
+            setDefaultValue("")
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        }.let(screen::addPreference)
+    }
+
     companion object {
         const val AUTHOR_FALLBACK = "Unknown"
         const val ARTIST_FALLBACK = "Unknown"
         const val DESCRIPTION_FALLBACK = "No description."
         const val SEARCH_FALLBACK_MSG = "Please enter a valid Cubari URL"
+        private const val PREF_GITHUB_TOKEN = "cubari_github_token"
 
         enum class SortType {
             PINNED,

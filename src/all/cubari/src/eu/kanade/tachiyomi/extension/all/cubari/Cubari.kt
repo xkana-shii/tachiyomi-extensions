@@ -215,27 +215,13 @@ class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
 
     private fun isGithubHost(host: String): Boolean {
         val h = host.lowercase()
-        return h == "github.com" ||
-            h == "api.github.com" ||
-            h == "raw.github.com" ||
-            h == "raw.githubusercontent.com" ||
-            h == "user-images.githubusercontent.com" ||
-            h == "gist.githubusercontent.com" ||
-            h.endsWith(".github.com") ||
-            h.endsWith(".githubusercontent.com")
+        return h == "github.com" || h.endsWith(".github.com") || h.endsWith(".githubusercontent.com")
     }
 
     private fun proxyUrlIfGithubHost(url: String): String {
         if (url.isBlank()) return url
-
-        val host = try {
-            url.toHttpUrl().host
-        } catch (e: Exception) {
-            return url
-        }
-
+        val host = runCatching { url.toHttpUrl().host }.getOrNull() ?: return url
         if (!isGithubHost(host)) return url
-
         val encoded = Base64.encodeToString(url.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP)
         return "cubari://proxy/$encoded"
     }
@@ -243,33 +229,18 @@ class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
     override suspend fun getImage(page: Page): Response = withContext(Dispatchers.IO) {
         val imageUrl = page.imageUrl ?: throw IllegalArgumentException("imageUrl is null")
 
-        if (imageUrl.startsWith("cubari://proxy/")) {
-            val encoded = imageUrl.removePrefix("cubari://proxy/")
-            val originalUrl = try {
-                String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP))
-            } catch (e: Exception) {
-                throw IllegalArgumentException("Invalid proxy URL")
-            }
-
-            val req = Request.Builder()
-                .url(originalUrl)
-                .get()
-                .build()
-
-            try {
-                val resp = client.newCall(req).execute()
-                if (resp.isSuccessful) {
-                    return@withContext resp
-                } else {
-                    resp.close()
-                }
-            } catch (_: Exception) {
-            }
-
-            return@withContext network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
+        if (!imageUrl.startsWith("cubari://proxy/")) {
+            return@withContext network.client.newCall(Request.Builder().url(imageUrl).get().build()).execute()
         }
 
-        return@withContext network.client.newCall(Request.Builder().url(imageUrl).get().build()).execute()
+        val originalUrl = runCatching {
+            String(Base64.decode(imageUrl.removePrefix("cubari://proxy/"), Base64.URL_SAFE or Base64.NO_WRAP))
+        }.getOrElse { throw IllegalArgumentException("Invalid proxy URL") }
+
+        runCatching { client.newCall(Request.Builder().url(originalUrl).get().build()).execute() }
+            .getOrNull()
+            ?.takeIf { it.isSuccessful }
+            ?: network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
     }
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
@@ -319,58 +290,40 @@ class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = GET("$baseUrl/", cubariHeaders)
 
-    private fun languageCodeAlias(raw: String): String? = when (raw.lowercase()) {
-        "en", "english" -> "en"
-        "ja", "jp", "japanese" -> "ja"
-        "ko", "kr", "korean" -> "ko"
-        "zh", "chinese", "zh-cn", "zh-hans", "zh-hant" -> "zh"
-        else -> null
-    }
+    private fun languageCodeAlias(raw: String): String? = mapOf(
+        "en" to "en", "english" to "en",
+        "ja" to "ja", "jp" to "ja", "japanese" to "ja",
+        "ko" to "ko", "kr" to "ko", "korean" to "ko",
+        "zh" to "zh", "chinese" to "zh", "zh-cn" to "zh", "zh-hans" to "zh", "zh-hant" to "zh",
+    )[raw.lowercase()]
 
     private fun extractSupportedLang(description: String?): String? {
         if (description == null) return null
-
-        val langRegex = Regex("""^\s*Lang(?:uage)?[\s:]+([A-Za-z0-9\-_]+)\s*$""", RegexOption.IGNORE_CASE)
-        for (line in description.lines()) {
-            val code = langRegex.find(line)?.groupValues?.get(1)?.trim() ?: continue
-            languageCodeAlias(code)?.let { return it }
-        }
-
         val lower = description.lowercase()
-        val inlineTokenRegex = Regex("""lang:\s*([A-Za-z0-9\-_]+)""")
-        inlineTokenRegex.find(lower)?.groupValues?.get(1)?.let { token ->
-            languageCodeAlias(token)?.let { return it }
-        }
 
-        val nameMap = mapOf(
-            "english" to "en",
-            "japanese" to "ja",
-            "korean" to "ko",
-            "chinese" to "zh",
-        )
-        for ((name, code) in nameMap) {
-            if (lower.contains(name)) return code
-        }
+        val lineRegex = Regex("""^\s*lang(?:uage)?[\s:]+([a-z0-9\-_]+)\s*$""", RegexOption.MULTILINE)
+        lineRegex.find(lower)?.groupValues?.get(1)?.let { languageCodeAlias(it)?.let { c -> return c } }
 
-        if (lower.contains("zh-cn") || lower.contains("zh-hans") || lower.contains("zh-hant")) return "zh"
+        Regex("""lang:\s*([a-z0-9\-_]+)""").find(lower)?.groupValues?.get(1)
+            ?.let { languageCodeAlias(it)?.let { c -> return c } }
 
-        return null
+        return listOf("english" to "en", "japanese" to "ja", "korean" to "ko", "chinese" to "zh")
+            .firstOrNull { (name, _) -> lower.contains(name) }?.second
+            ?: if (lower.contains("zh-cn") || lower.contains("zh-hans") || lower.contains("zh-hant")) "zh" else null
     }
 
     private fun githubRepoMangaList(repo: String): MangasPage {
         val branch = "master"
-        val treeUrl = "https://api.github.com/repos/$repo/git/trees/$branch?recursive=1"
-
         val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
 
-        val treeReqBuilder = Request.Builder()
-            .url(treeUrl)
-            .header("Accept", "application/vnd.github+json")
-        if (token.isNotEmpty()) {
-            treeReqBuilder.header("Authorization", "token $token")
-        }
+        fun Request.Builder.withToken() = apply { if (token.isNotEmpty()) header("Authorization", "token $token") }
 
-        val treeResp = client.newCall(treeReqBuilder.build()).execute()
+        val treeResp = client.newCall(
+            Request.Builder()
+                .url("https://api.github.com/repos/$repo/git/trees/$branch?recursive=1")
+                .header("Accept", "application/vnd.github+json")
+                .withToken().build(),
+        ).execute()
 
         val jsonFiles: List<String> = if (treeResp.isSuccessful) {
             val tree = JSONObject(treeResp.body?.string() ?: "").getJSONArray("tree")
@@ -383,7 +336,6 @@ class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
         }
 
         val requiredKeys = listOf("title", "description", "artist", "author")
-
         val enforceLang = preferences.getBoolean(PREF_ENFORCE_LANGUAGE, true)
         val sourceLang = lang.lowercase()
         val showAllLangs = sourceLang == "all" || sourceLang == "other"
@@ -392,21 +344,13 @@ class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
         val validMangaList = jsonFiles.mapNotNull { path ->
             val rawUrl = "https://raw.githubusercontent.com/$repo/$branch/$path"
             runCatching {
-                val rawReqBuilder = Request.Builder().url(rawUrl)
-                if (token.isNotEmpty()) {
-                    rawReqBuilder.header("Authorization", "token $token")
-                }
-                val resp = client.newCall(rawReqBuilder.build()).execute()
+                val resp = client.newCall(Request.Builder().url(rawUrl).withToken().build()).execute()
                 if (!resp.isSuccessful) return@mapNotNull null
                 val json = JSONObject(resp.body?.string() ?: return@mapNotNull null)
                 if (!requiredKeys.all { json.has(it) }) return@mapNotNull null
 
                 val descField = json.optString("description", "")
-
-                if (sourceCode != null) {
-                    val detectedLang = extractSupportedLang(descField)
-                    if (detectedLang == null || detectedLang != sourceCode) return@mapNotNull null
-                }
+                if (sourceCode != null && extractSupportedLang(descField) != sourceCode) return@mapNotNull null
 
                 val displayTitle = json.optString("title").takeIf { it.isNotBlank() }
                     ?: path.substringAfterLast("/").removeSuffix(".json")

@@ -6,6 +6,9 @@ import eu.kanade.tachiyomi.source.SourceFactory
 class CubariFactory : SourceFactory {
     override fun createSources(): List<Source> = listOf(
         Cubari("en"),
+        Cubari("ja"),
+        Cubari("ko"),
+        Cubari("zh"),
         Cubari("all"),
         Cubari("other"),
     )

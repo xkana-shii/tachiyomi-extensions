@@ -33,9 +33,7 @@ import okhttp3.Response
 import org.json.JSONObject
 import rx.Observable
 
-class Cubari(override val lang: String) :
-    HttpSource(),
-    ConfigurableSource {
+class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
 
     override val name = "Cubari"
 
@@ -48,27 +46,15 @@ class Cubari(override val lang: String) :
     override val client = network.cloudflareClient.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
-            val headersBuilder = request.headers.newBuilder()
-                .removeAll("Accept-Encoding")
-
-            // Add Authorization header for GitHub hosts when token is set in preferences
             val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
-            if (token.isNotBlank()) {
-                val host = request.url.host
-                if (
-                    host == "api.github.com" ||
-                    host == "raw.githubusercontent.com" ||
-                    host == "user-images.githubusercontent.com" ||
-                    host == "gist.githubusercontent.com" ||
-                    host == "raw.github.com" ||
-                    host.endsWith("githubusercontent.com") ||
-                    host.endsWith("github.com")
-                ) {
-                    headersBuilder.set("Authorization", "token $token")
+            val headers = request.headers.newBuilder()
+                .removeAll("Accept-Encoding")
+                .apply {
+                    if (token.isNotBlank() && isGithubHost(request.url.host)) {
+                        set("Authorization", "token $token")
+                    }
                 }
-            }
-
-            val headers = headersBuilder.build()
+                .build()
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         .build()
@@ -185,7 +171,6 @@ class Cubari(override val lang: String) :
                 jsonEl.jsonPrimitive.content
             }
 
-            // If the URL points to GitHub-hosted content, return a proxy URL that will be handled lazily by getImage
             val finalUrl = proxyUrlIfGithubHost(page)
             Page(i, "", finalUrl)
         }
@@ -228,40 +213,33 @@ class Cubari(override val lang: String) :
 
     override fun pageListParse(response: Response): List<Page> = throw UnsupportedOperationException()
 
-    /**
-     * Replace GitHub-hosted HTTP URLs with a cubari://proxy/<base64> URL that will be handled lazily in getImage.
-     * If the URL is not a GitHub host, return it unchanged.
-     */
+    private fun isGithubHost(host: String): Boolean {
+        val h = host.lowercase()
+        return h == "github.com" ||
+            h == "api.github.com" ||
+            h == "raw.github.com" ||
+            h == "raw.githubusercontent.com" ||
+            h == "user-images.githubusercontent.com" ||
+            h == "gist.githubusercontent.com" ||
+            h.endsWith(".github.com") ||
+            h.endsWith(".githubusercontent.com")
+    }
+
     private fun proxyUrlIfGithubHost(url: String): String {
         if (url.isBlank()) return url
 
-        val parsed = try {
-            url.toHttpUrl()
+        val host = try {
+            url.toHttpUrl().host
         } catch (e: Exception) {
             return url
         }
 
-        val host = parsed.host.lowercase()
-        val isGithubHost = host == "github.com" ||
-            host.endsWith("github.com") ||
-            host == "raw.githubusercontent.com" ||
-            host == "user-images.githubusercontent.com" ||
-            host == "gist.githubusercontent.com" ||
-            host.endsWith("githubusercontent.com")
-
-        if (!isGithubHost) return url
+        if (!isGithubHost(host)) return url
 
         val encoded = Base64.encodeToString(url.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP)
         return "cubari://proxy/$encoded"
     }
 
-    /**
-     * Intercept image fetches. If the image URL is our cubari://proxy/... scheme, decode and fetch the original image
-     * using the extension's client (which will add Authorization when token is set). Falls back to an unauthenticated
-     * fetch using the app global client if the authenticated fetch fails.
-     *
-     * This overrides HttpSource.getImage(page) so network operations are dispatched to IO.
-     */
     override suspend fun getImage(page: Page): Response = withContext(Dispatchers.IO) {
         val imageUrl = page.imageUrl ?: throw IllegalArgumentException("imageUrl is null")
 
@@ -270,11 +248,9 @@ class Cubari(override val lang: String) :
             val originalUrl = try {
                 String(Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP))
             } catch (e: Exception) {
-                // If decoding fails, propagate an error so the caller can handle it.
                 throw IllegalArgumentException("Invalid proxy URL")
             }
 
-            // First attempt: use extension client (authenticated for GitHub hosts)
             val req = Request.Builder()
                 .url(originalUrl)
                 .get()
@@ -288,14 +264,11 @@ class Cubari(override val lang: String) :
                     resp.close()
                 }
             } catch (_: Exception) {
-                // ignore and fall through to unauthenticated attempt
             }
 
-            // Fallback: try unauthenticated using app global client
             return@withContext network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
         }
 
-        // Non-proxy URLs: let the app/global client fetch it as normal
         return@withContext network.client.newCall(Request.Builder().url(imageUrl).get().build()).execute()
     }
 
@@ -346,6 +319,44 @@ class Cubari(override val lang: String) :
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = GET("$baseUrl/", cubariHeaders)
 
+    private fun languageCodeAlias(raw: String): String? = when (raw.lowercase()) {
+        "en", "english" -> "en"
+        "ja", "jp", "japanese" -> "ja"
+        "ko", "kr", "korean" -> "ko"
+        "zh", "chinese", "zh-cn", "zh-hans", "zh-hant" -> "zh"
+        else -> null
+    }
+
+    private fun extractSupportedLang(description: String?): String? {
+        if (description == null) return null
+
+        val langRegex = Regex("""^\s*Lang(?:uage)?[\s:]+([A-Za-z0-9\-_]+)\s*$""", RegexOption.IGNORE_CASE)
+        for (line in description.lines()) {
+            val code = langRegex.find(line)?.groupValues?.get(1)?.trim() ?: continue
+            languageCodeAlias(code)?.let { return it }
+        }
+
+        val lower = description.lowercase()
+        val inlineTokenRegex = Regex("""lang:\s*([A-Za-z0-9\-_]+)""")
+        inlineTokenRegex.find(lower)?.groupValues?.get(1)?.let { token ->
+            languageCodeAlias(token)?.let { return it }
+        }
+
+        val nameMap = mapOf(
+            "english" to "en",
+            "japanese" to "ja",
+            "korean" to "ko",
+            "chinese" to "zh",
+        )
+        for ((name, code) in nameMap) {
+            if (lower.contains(name)) return code
+        }
+
+        if (lower.contains("zh-cn") || lower.contains("zh-hans") || lower.contains("zh-hant")) return "zh"
+
+        return null
+    }
+
     private fun githubRepoMangaList(repo: String): MangasPage {
         val branch = "master"
         val treeUrl = "https://api.github.com/repos/$repo/git/trees/$branch?recursive=1"
@@ -372,6 +383,12 @@ class Cubari(override val lang: String) :
         }
 
         val requiredKeys = listOf("title", "description", "artist", "author")
+
+        val enforceLang = preferences.getBoolean(PREF_ENFORCE_LANGUAGE, true)
+        val sourceLang = lang.lowercase()
+        val showAllLangs = sourceLang == "all" || sourceLang == "other"
+        val sourceCode = if (!showAllLangs && enforceLang) languageCodeAlias(sourceLang) else null
+
         val validMangaList = jsonFiles.mapNotNull { path ->
             val rawUrl = "https://raw.githubusercontent.com/$repo/$branch/$path"
             runCatching {
@@ -384,6 +401,13 @@ class Cubari(override val lang: String) :
                 val json = JSONObject(resp.body?.string() ?: return@mapNotNull null)
                 if (!requiredKeys.all { json.has(it) }) return@mapNotNull null
 
+                val descField = json.optString("description", "")
+
+                if (sourceCode != null) {
+                    val detectedLang = extractSupportedLang(descField)
+                    if (detectedLang == null || detectedLang != sourceCode) return@mapNotNull null
+                }
+
                 val displayTitle = json.optString("title").takeIf { it.isNotBlank() }
                     ?: path.substringAfterLast("/").removeSuffix(".json")
                 val gistBase64 = Base64.encodeToString(
@@ -394,7 +418,7 @@ class Cubari(override val lang: String) :
                 SManga.create().apply {
                     title = displayTitle
                     url = "/read/gist/$gistBase64"
-                    description = "GitHub: $repo\nPath: $path"
+                    description = "GitHub: $repo\nPath: $path" + if (descField.isNotBlank()) "\n\n$descField" else ""
                     thumbnail_url = json.optString("cover", "")
                 }
             }.getOrNull()
@@ -571,12 +595,18 @@ class Cubari(override val lang: String) :
         EditTextPreference(screen.context).apply {
             key = PREF_GITHUB_TOKEN
             title = "GitHub Personal Access Token"
-            summary = "Optional. Use to increase GitHub API rate limit for repository searches and authenticated fetches."
-            dialogMessage = "Enter a GitHub personal access token (no special scopes needed for public repo reads). Token is stored locally and used only for API/raw/image requests made by this extension."
+            summary = "Use to increase GitHub API rate limit for repository searches and authenticated fetches."
             setDefaultValue("")
             setOnBindEditTextListener { editText ->
                 editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             }
+        }.let(screen::addPreference)
+
+        androidx.preference.SwitchPreferenceCompat(screen.context).apply {
+            key = PREF_ENFORCE_LANGUAGE
+            title = "Enforce Language"
+            summary = "When enabled, only manga matching the selected language will be shown for repository searches. Disable to show all."
+            setDefaultValue(true)
         }.let(screen::addPreference)
     }
 
@@ -586,6 +616,7 @@ class Cubari(override val lang: String) :
         const val DESCRIPTION_FALLBACK = "No description."
         const val SEARCH_FALLBACK_MSG = "Please enter a valid Cubari URL"
         private const val PREF_GITHUB_TOKEN = "cubari_github_token"
+        private const val PREF_ENFORCE_LANGUAGE = "cubari_enforce_language"
 
         enum class SortType {
             PINNED,

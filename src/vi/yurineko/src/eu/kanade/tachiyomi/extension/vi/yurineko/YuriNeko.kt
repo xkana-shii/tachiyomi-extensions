@@ -286,10 +286,19 @@ class YuriNeko : HttpSource() {
     // =============================== Related ================================
 
     // dirty hack to disable suggested mangas on Komikku due to heavy rate limit
-    // https://github.com/komikku-app/komikku/blob/4323fd5841b390213aa4c4af77e07ad42eb423fc/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/CatalogueSource.kt#L176-L184
-    @Suppress("Unused")
-    @JvmName("getDisableRelatedMangasBySearch")
-    fun disableRelatedMangasBySearch() = true
+    override val disableRelatedMangasBySearch = true
+
+    override fun relatedMangaListRequest(manga: SManga): Request {
+        val mangaId = "$baseUrl${manga.url}"
+            .toHttpUrl()
+            .mangaId()
+        return GET("$apiUrl/mangas/$mangaId/related", headers)
+    }
+
+    override fun relatedMangaListParse(response: Response): List<SManga> {
+        val related = response.parseAs<List<MangaDto>>()
+        return related.map(::mangaFromDto)
+    }
 
     companion object {
         private const val POPULAR_LIMIT = 10

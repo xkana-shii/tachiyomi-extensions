@@ -2,7 +2,7 @@ ext {
     kmkVersionCode = 1
     extName = 'MangaDex'
     extClass = '.MangaDexFactory'
-    extVersionCode = 206
+    extVersionCode = 207
     isNsfw = true
 }
 

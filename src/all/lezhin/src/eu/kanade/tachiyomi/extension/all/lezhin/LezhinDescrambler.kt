@@ -5,7 +5,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sqrt
 
 object LezhinDescrambler {
@@ -13,25 +12,32 @@ object LezhinDescrambler {
     fun descramble(input: ByteArray, episodeId: Int, numColAndRows: Int = 5): ByteArray {
         val bmp = try {
             BitmapFactory.decodeByteArray(input, 0, input.size)
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             null
         } ?: return input
 
         val width = bmp.width
         val height = bmp.height
 
-        // generate order
-        val order = try { generateOrder(episodeId.toLong(), numColAndRows) } catch (_: Throwable) { null }
+        val order = try {
+            generateOrder(episodeId.toLong(), numColAndRows)
+        } catch (_: Throwable) {
+            null
+        }
         if (order == null || order.isEmpty()) {
             bmp.recycle()
             return input
         }
 
-        val pieces = try { calculatePieces(width, height, numColAndRows, order) } catch (_: Throwable) { emptyList() }
+        val pieces = try {
+            calculatePieces(width, height, numColAndRows, order)
+        } catch (_: Throwable) {
+            emptyList()
+        }
 
         val unscrambled = try {
             Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        } catch (e: Throwable) {
+        } catch (_: Throwable) {
             bmp.recycle()
             return input
         }
@@ -42,16 +48,13 @@ object LezhinDescrambler {
             try {
                 val from = p.from
                 val to = p.to
-                // Validate piece rects
                 if (from.width <= 0 || from.height <= 0 || to.width <= 0 || to.height <= 0) continue
                 if (from.left < 0 || from.top < 0) continue
                 if (from.left + from.width > width || from.top + from.height > height) continue
-                // Safely create bitmap slice
                 val pieceBitmap = Bitmap.createBitmap(bmp, from.left, from.top, from.width, from.height)
                 canvas.drawBitmap(pieceBitmap, to.left.toFloat(), to.top.toFloat(), null)
                 pieceBitmap.recycle()
             } catch (_: Throwable) {
-                // If any piece fails, abort descramble and return original input
                 unscrambled.recycle()
                 bmp.recycle()
                 return input

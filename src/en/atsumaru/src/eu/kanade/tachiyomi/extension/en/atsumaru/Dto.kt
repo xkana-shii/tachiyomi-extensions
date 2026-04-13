@@ -56,7 +56,7 @@ class MangaDto(
     // Details
     private val authors: List<AuthorDto>? = null,
     private val synopsis: String? = null,
-    private val tags: List<TagDto>? = null,
+    private val genres: List<TagDto>? = null,
     private val status: String? = null,
     private val type: String? = null,
     val scanlators: List<ScanlatorDto>? = null,
@@ -89,7 +89,7 @@ class MangaDto(
         description = synopsis
         genre = buildList {
             type?.let { add(it) }
-            tags?.forEach { add(it.name) }
+            genres?.forEach { add(it.name) }
         }.joinToString()
         authors?.let {
             author = it.joinToString { author -> author.name }
@@ -182,7 +182,6 @@ class PageDataDto(
 @Serializable
 internal class SearchRequest(
     val page: Int,
-    val sort: String,
     val filter: SearchFilter,
 )
 
@@ -196,4 +195,5 @@ internal class SearchFilter(
     val minChapters: Int? = null,
     val showAdult: Boolean = false,
     val officialTranslation: Boolean = false,
+    val sortBy: String? = null,
 )

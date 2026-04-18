@@ -285,7 +285,7 @@ class YuriNeko : HttpSource() {
 
     // =============================== Related ================================
 
-    // dirty hack to disable suggested mangas on Komikku due to heavy rate limit
+    // disable suggested mangas on Komikku due to heavy rate limit
     override val disableRelatedMangasBySearch = true
 
     override fun relatedMangaListRequest(manga: SManga): Request {

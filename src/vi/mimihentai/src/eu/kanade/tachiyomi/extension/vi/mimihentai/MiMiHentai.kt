@@ -194,7 +194,7 @@ class MiMiHentai : HttpSource() {
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
     // =============================== Related ================================
-
+    // disable suggested mangas on Komikku due to heavy rate limit
     override val disableRelatedMangasBySearch = true
 
     // ============================== Filters ===============================

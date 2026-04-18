@@ -350,8 +350,7 @@ class YuriGarden :
 
     // =============================== Related ================================
 
-    // dirty hack to disable suggested mangas on Komikku due to heavy rate limit
-    // https://github.com/komikku-app/komikku/blob/4323fd5841b390213aa4c4af77e07ad42eb423fc/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/CatalogueSource.kt#L176-L184
+    // disable suggested mangas on Komikku due to heavy rate limit
     override val disableRelatedMangasBySearch = true
 
     // ============================== Helpers ================================

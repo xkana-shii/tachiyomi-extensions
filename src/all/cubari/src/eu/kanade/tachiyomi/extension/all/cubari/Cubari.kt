@@ -33,7 +33,9 @@ import okhttp3.Response
 import org.json.JSONObject
 import rx.Observable
 
-class Cubari(override val lang: String) : HttpSource(), ConfigurableSource {
+class Cubari(override val lang: String) :
+    HttpSource(),
+    ConfigurableSource {
 
     override val name = "Cubari"
 

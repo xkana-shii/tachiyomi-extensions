@@ -165,7 +165,7 @@ class Mangago :
     private val titleRegex: Regex by lazy {
         Regex(
             """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|‹[^›]*›|-[^-]*-|/\s*Official|([|].*)|([/].*)|([~].*))\s*)+$""",
-            RegexOption.IGNORE_CASE
+            RegexOption.IGNORE_CASE,
         )
     }
 

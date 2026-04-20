@@ -177,11 +177,11 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val filterList = if (filters.isEmpty()) getFilterList() else filters
         // whether enforce language is true will change the index of the loop below
-        val indexModifier = filterList.filterIsInstance<EnforceLanguageFilter>().first().indexModifier()
+        filterList.filterIsInstance<EnforceLanguageFilter>().first().indexModifier()
 
         val uri = Uri.parse("$baseUrl/page/$page/").buildUpon()
             .appendQueryParameter("s", query)
-        filterList.forEachIndexed { i, filter ->
+        filterList.forEachIndexed { _, filter ->
             if (filter is UriFilter) {
                 filter.addToUri(uri)
             }
@@ -358,14 +358,9 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
 
     // Parses cached page for filters
     private fun returnFilter(url: String, css: String): Array<Pair<String, String>> {
-        val document = if (filterMap.isEmpty()) {
-            filtersCached = false
-            null
-        } else {
-            filtersCached = true
-            Jsoup.parse(filterMap[url]!!)
-        }
-        return document?.select(css)?.map { Pair(it.text(), it.attr("href")?.split("/")?.dropLast(1)?.last() ?: "") }?.toTypedArray()
+        val html = filterMap[url]
+        val document = html?.let { Jsoup.parse(it) }
+        return document?.select(css)?.map { Pair(it.text(), it.attr("href").split("/").dropLast(1).last()) }?.toTypedArray()
             ?: arrayOf(Pair("Press 'Reset' to load filters", ""))
     }
 
@@ -412,7 +407,7 @@ open class MyReadingManga(override val lang: String, private val siteLang: Strin
     /**
      * Class that creates a select filter. Each entry in the dropdown has a name and a display name.
      * If an entry is selected it is appended as a query parameter onto the end of the URI.
-     * If `firstIsUnspecified` is set to true, if the first entry is selected, nothing will be appended on the the URI.
+     * If `firstIsUnspecified` is set to true, if the first entry is selected, nothing will be appended on the URI.
      */
     private open class UriSelectFilter(
         displayName: String,

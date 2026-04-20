@@ -197,16 +197,22 @@ abstract class Madara(
     }
 
     // Related Manga
-    override fun relatedMangaListSelector() = ".related-reading-wrap"
+    protected open fun relatedMangaSelector() = ".related-reading-wrap"
 
-    override fun relatedMangaFromElement(element: Element): SManga = SManga.create().apply {
-        element.selectFirst(".widget-title a")!!.let {
-            setUrlWithoutDomain(it.attr("abs:href"))
-            title = it.ownText()
-        }
-        element.selectFirst(".widget-thumbnail img")?.let {
-            thumbnail_url = imageFromElement(it)
-        }
+    override fun relatedMangaListParse(response: Response): List<SManga> {
+        val document = response.asJsoup()
+        return document.select(relatedMangaSelector())
+            .mapNotNull { manga ->
+                SManga.create().apply {
+                    manga.selectFirst(".widget-title a")?.let {
+                        setUrlWithoutDomain(it.attr("abs:href"))
+                        title = it.ownText()
+                    } ?: return@mapNotNull null
+                    manga.selectFirst(".widget-thumbnail img")?.let {
+                        thumbnail_url = processThumbnail(imageFromElement(it), true)
+                    }
+                }
+            }
     }
 
     // Latest Updates

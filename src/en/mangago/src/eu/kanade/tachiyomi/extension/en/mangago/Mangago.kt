@@ -162,8 +162,12 @@ class Mangago :
 
     override fun searchMangaNextPageSelector() = genreListingNextPageSelector
 
-    private var titleRegex: Regex =
-        Regex("\\([^()]*\\)|\\{[^{}]*\\}|\\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|([|].*)|([/].*)|([~].*)|-[^-]*-|‹[^›]*›", RegexOption.IGNORE_CASE)
+    private val titleRegex: Regex by lazy {
+        Regex(
+            """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|‹[^›]*›|-[^-]*-|/\s*Official|([|].*)|([/].*)|([~].*))\s*)+$""",
+            RegexOption.IGNORE_CASE
+        )
+    }
 
     override fun mangaDetailsParse(document: Document) = SManga.create().apply {
         val matches = mutableListOf<String>()

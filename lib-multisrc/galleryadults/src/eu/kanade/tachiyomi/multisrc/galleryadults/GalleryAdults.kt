@@ -387,12 +387,13 @@ abstract class GalleryAdults(
      * - use comma(, ) for separate terms, as AND condition.
      * Plus(+) after comma(, ) doesn't have any effect.
      */
-    protected open fun buildQueryString(tags: List<String>, query: String): String = (tags + query).filterNot { it.isBlank() }.joinToString(",") {
-        // any space except after a comma (we're going to replace spaces only between words)
-        it.trim()
-            .replace(regexSpaceNotAfterComma, "+")
-            .replace(" ", "")
-    }
+    protected open fun buildQueryString(tags: List<String>, query: String): String = (tags + query).filter(String::isNotBlank)
+        .joinToString(",") {
+            // any space except after a comma (we're going to replace spaces only between words)
+            it.trim()
+                .replace(regexSpaceNotAfterComma, "+")
+                .replace(" ", "")
+        }
 
     protected open fun tagBrowsingSearchRequest(page: Int, query: String, filters: FilterList): Request {
         // Basic search
@@ -460,10 +461,10 @@ abstract class GalleryAdults(
         }
     }
 
-    protected open fun Elements.searchMangaFromElements(hasNextPage: Boolean): List<SManga> = map {
+    protected open fun Elements.searchMangaFromElements(hasNextPage: Boolean): List<SManga> = mapNotNull {
         SMangaDto(
-            title = it.mangaTitle()!!,
-            url = it.mangaUrl()!!,
+            title = it.mangaTitle() ?: return@mapNotNull null,
+            url = it.mangaUrl() ?: return@mapNotNull null,
             thumbnail = it.mangaThumbnail(),
             lang = it.mangaLang(),
         )
@@ -471,7 +472,11 @@ abstract class GalleryAdults(
         .let { unfiltered ->
             val results = unfiltered.filter { mangaLang.isBlank() || it.lang == mangaLang }
             // return at least 1 title if all mangas in current page is of other languages
-            if (results.isEmpty() && hasNextPage) listOf(unfiltered[0]) else results
+            if (results.isEmpty() && hasNextPage) {
+                unfiltered.firstOrNull()?.let(::listOf) ?: emptyList()
+            } else {
+                results
+            }
         }
         .map {
             SManga.create().apply {
@@ -488,10 +493,10 @@ abstract class GalleryAdults(
     override fun searchMangaNextPageSelector() = popularMangaNextPageSelector()
 
     /* Related titles */
-    override fun relatedMangaListSelector() = ".related ${popularMangaSelector()}"
+    protected open fun relatedMangaSelector() = popularMangaSelector()
 
     override fun relatedMangaListParse(response: Response): List<SManga> = response.asJsoup()
-        .select(relatedMangaListSelector())
+        .select(relatedMangaSelector())
         .searchMangaFromElements(hasNextPage = false)
 
     /* Details */
@@ -501,7 +506,7 @@ abstract class GalleryAdults(
         SManga.create().apply {
             update_strategy = UpdateStrategy.ONLY_FETCH_ONCE
             status = SManga.COMPLETED
-            title = mangaTitle("h1")!!
+            mangaTitle("h1")?.let { title = it }
             thumbnail_url = getCover()
             genre = getInfo("Tags")
             author = getInfo("Artists")
@@ -683,11 +688,11 @@ abstract class GalleryAdults(
         val pageUrl = "$baseUrl/$pageUri/$galleryId"
 
         val pages = document.select("$thumbnailSelector a")
-            .map {
+            .mapNotNull {
                 if (parsingImagePageByPage) {
                     it.absUrl("href")
                 } else {
-                    it.selectFirst("img")!!.imgAttr()
+                    it.selectFirst("img")?.imgAttr() ?: return@mapNotNull null
                 }
             }
             .toMutableList()
@@ -696,15 +701,16 @@ abstract class GalleryAdults(
             val form = pageRequestForm(document, totalPages, pages.size)
 
             val morePages = client.newCall(POST("$baseUrl/$pagesRequest", xhrHeaders, form))
-                .execute()
-                .asJsoup()
-                .select("a")
-                .map {
-                    if (parsingImagePageByPage) {
-                        it.absUrl("href")
-                    } else {
-                        it.selectFirst("img")!!.imgAttr()
-                    }
+                .execute().use {
+                    it.asJsoup()
+                        .select("a")
+                        .mapNotNull {
+                            if (parsingImagePageByPage) {
+                                it.absUrl("href")
+                            } else {
+                                it.selectFirst("img")?.imgAttr() ?: return@mapNotNull null
+                            }
+                        }
                 }
             if (morePages.isNotEmpty()) {
                 pages.addAll(morePages)
@@ -763,7 +769,7 @@ abstract class GalleryAdults(
         }
     }
 
-    override fun imageUrlParse(document: Document): String = document.selectFirst("img#gimg, img#fimg")?.imgAttr()!!
+    override fun imageUrlParse(document: Document): String = document.selectFirst("img#gimg, img#fimg")?.imgAttr() ?: ""
 
     /* Filters */
     private val scope = CoroutineScope(Dispatchers.IO)

@@ -4,10 +4,11 @@ import android.text.Html
 import android.util.Log
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
@@ -15,7 +16,7 @@ import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
-class YaoiMangaOnline : ParsedHttpSource() {
+class YaoiMangaOnline : HttpSource() {
     override val lang = "all"
     override val name = "Yaoi Manga Online"
     override val baseUrl = "https://yaoimangaonline.com"
@@ -99,20 +100,23 @@ class YaoiMangaOnline : ParsedHttpSource() {
 
             tagData = arrayOf("ALL" to "") + tagLinks
                 .mapNotNull { a ->
-                    val name = a.text().trim()
+                    val tagName = a.text().trim()
                     val href = a.attr("href").trim()
                     val slug = href.trimEnd('/').substringAfterLast("/tag/").trimEnd('/').trim()
-                    Log.d("YaoiMangaOnline", "Tag: $name -> href=$href slug=$slug")
-                    if (name.isEmpty() || slug.isEmpty()) {
+                    Log.d("YaoiMangaOnline", "Tag: $tagName -> href=$href slug=$slug")
+                    if (tagName.isEmpty() || slug.isEmpty()) {
                         null
                     } else {
-                        Pair(name, slug)
+                        Pair(tagName, slug)
                     }
                 }
                 .toTypedArray()
 
             filtersInitialized = true
-            Log.d("YaoiMangaOnline", "Filters initialized: ${typeData.size} types, ${doujinshiData.size} doujinshi, ${tagData.size} tags")
+            Log.d(
+                "YaoiMangaOnline",
+                "Filters initialized: ${typeData.size} types, ${doujinshiData.size} doujinshi, ${tagData.size} tags",
+            )
         } catch (e: Exception) {
             Log.e("YaoiMangaOnline", "Failed to fetch filters", e)
         }
@@ -127,16 +131,31 @@ class YaoiMangaOnline : ParsedHttpSource() {
         )
     }
 
-    override fun latestUpdatesSelector() = popularMangaSelector()
-    override fun latestUpdatesNextPageSelector() = popularMangaNextPageSelector()
-    override fun latestUpdatesRequest(page: Int) = popularMangaRequest(page)
-    override fun latestUpdatesFromElement(element: Element) = popularMangaFromElement(element)
-    override fun popularMangaSelector() = searchMangaSelector()
-    override fun popularMangaNextPageSelector() = searchMangaNextPageSelector()
+    // =================== Popular ===================
+
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/page/$page/", headers)
-    override fun popularMangaFromElement(element: Element) = searchMangaFromElement(element)
-    override fun searchMangaSelector() = ".post:not(.category-gay-movies):not(.category-yaoi-anime):not(.sticky) > div > a"
-    override fun searchMangaNextPageSelector() = ".herald-pagination > .next"
+
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(searchMangaSelector()).map { element ->
+            searchMangaFromElement(element)
+        }
+        val hasNextPage = document.selectFirst(searchMangaNextPageSelector()) != null
+        return MangasPage(mangas, hasNextPage)
+    }
+
+    // =================== Latest ===================
+
+    override fun latestUpdatesRequest(page: Int) = throw UnsupportedOperationException()
+
+    override fun latestUpdatesParse(response: Response): MangasPage = throw UnsupportedOperationException()
+
+    // =================== Search ===================
+
+    private fun searchMangaSelector() =
+        ".post:not(.category-gay-movies):not(.category-yaoi-anime):not(.sticky) > div > a"
+
+    private fun searchMangaNextPageSelector() = ".herald-pagination > .next"
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         var categoryId: String? = null
@@ -171,17 +190,25 @@ class YaoiMangaOnline : ParsedHttpSource() {
         }
     }
 
-    override fun searchMangaFromElement(element: Element) = SManga.create().apply {
+    override fun searchMangaParse(response: Response): MangasPage = popularMangaParse(response)
+
+    private fun searchMangaFromElement(element: Element) = SManga.create().apply {
         title = element.attr("title").trim()
         setUrlWithoutDomain(element.attr("href").trim())
         thumbnail_url = element.selectFirst("img")?.attr("src")?.trim()
     }
 
-    override fun mangaDetailsParse(document: Document) = SManga.create().apply {
+    // =================== Details ===================
+
+    override fun mangaDetailsParse(response: Response) = SManga.create().apply {
+        val document = response.asJsoup()
+
         title = document.select("h1.entry-title").text().trim()
-        title = title.substringBeforeLast("by").trim()
+            .substringBeforeLast("by").trim()
+
         thumbnail_url = document
             .selectFirst(".herald-post-thumbnail img")?.attr("src")?.trim()
+
         description = document.select(".entry-content > p:not(:has(img)):not(:contains(You need to login))")
             .joinToString("\n\n") {
                 @Suppress("DEPRECATION")
@@ -196,13 +223,16 @@ class YaoiMangaOnline : ParsedHttpSource() {
                 }
             }
             .trim()
+
         genre = document.select(".meta-tags > a").joinToString { it.text().trim() }
+
         author = document.select(".entry-content > p:matches((?i)(Author|Mangaka):)")
             .text()
             .trim()
             .replace(Regex("(?i)^.*?(Author|Mangaka):\\s*"), "")
             .substringBefore("Language:")
             .trim()
+
         status = when {
             document.selectFirst(".meta-category a[href*='/ongoing/']") != null -> SManga.ONGOING
             document.selectFirst(".meta-category a[href*='/completed/']") != null -> SManga.COMPLETED
@@ -211,23 +241,34 @@ class YaoiMangaOnline : ParsedHttpSource() {
         }
     }
 
-    override fun chapterListSelector() = ".mpp-toc a"
+    // =================== Chapters ===================
 
-    override fun chapterFromElement(element: Element) = SChapter.create().apply {
-        name = element.ownText().trim()
-        setUrlWithoutDomain((element.attr("href") ?: element.baseUri()).trim())
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val document = response.asJsoup()
+        val chapters = document.select(".mpp-toc a").map { element ->
+            SChapter.create().apply {
+                name = element.ownText().trim()
+                setUrlWithoutDomain(element.attr("href").ifEmpty { element.baseUri() }.trim())
+            }
+        }
+        return chapters.ifEmpty {
+            listOf(
+                SChapter.create().apply {
+                    name = "Chapter"
+                    url = response.request.url.encodedPath
+                },
+            )
+        }.reversed()
     }
 
-    override fun chapterListParse(response: Response) = super.chapterListParse(response).ifEmpty {
-        SChapter.create().apply {
-            name = "Chapter"
-            url = response.request.url.encodedPath
-        }.let(::listOf)
-    }.reversed()
+    // =================== Pages ===================
 
-    override fun pageListParse(document: Document) = document.select(".entry-content img").mapIndexed { idx, img ->
-        Page(idx, "", img.attr("src").trim())
+    override fun pageListParse(response: Response): List<Page> {
+        val document = response.asJsoup()
+        return document.select(".entry-content img").mapIndexed { idx, img ->
+            Page(idx, "", img.attr("src").trim())
+        }
     }
 
-    override fun imageUrlParse(document: Document) = throw UnsupportedOperationException()
+    override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 }

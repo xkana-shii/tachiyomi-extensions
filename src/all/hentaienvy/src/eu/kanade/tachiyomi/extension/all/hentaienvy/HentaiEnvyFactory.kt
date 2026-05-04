@@ -5,7 +5,6 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.SourceFactory
 
 class HentaiEnvyFactory : SourceFactory {
-
     override fun createSources(): List<Source> = listOf(
         HentaiEnvy("en", GalleryAdults.LANGUAGE_ENGLISH),
         HentaiEnvy("ja", GalleryAdults.LANGUAGE_JAPANESE),

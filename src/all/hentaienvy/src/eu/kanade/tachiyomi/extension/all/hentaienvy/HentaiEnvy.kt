@@ -17,15 +17,16 @@ class HentaiEnvy(
     lang = lang,
 ) {
     override val supportsLatest = mangaLang.isNotBlank()
-    override val supportAdvancedSearch: Boolean = true
-    override val supportSpeechless: Boolean = true
+    override val supportAdvancedSearch = true
+    override val supportSpeechless = true
 
-    override fun Element.mangaLang() = select(".flag a").attr("href")
-        .removeSuffix("/").substringAfterLast("/")
-        .let {
+    override fun Element.mangaLang() = selectFirst(".flag a")?.attr("href")
+        ?.removeSuffix("/")
+        ?.substringAfterLast("/")
+        ?.let {
             // Include Speechless in search results
             if (it == LANGUAGE_SPEECHLESS) mangaLang else it
-        }
+        } ?: mangaLang
 
     override fun Element.mangaTitle(selector: String): String? = mangaFullTitle(selector.takeIf { it != ".caption" } ?: ".title").let {
         if (preferences.shortTitle) it?.shortenTitle() else it
@@ -45,7 +46,8 @@ class HentaiEnvy(
             val name = it.ownText()
             if (tag.contains(regexTag)) {
                 genres[name] = it.attr("href")
-                    .removeSuffix("/").substringAfterLast('/')
+                    .removeSuffix("/")
+                    .substringAfterLast('/')
             }
             listOf(
                 name,
@@ -53,7 +55,7 @@ class HentaiEnvy(
                     .trim()
                     .removePrefix("| "),
             )
-                .filter { s -> s.isNotBlank() }
+                .filter(String::isNotBlank)
                 .joinToString()
         }
 
@@ -67,7 +69,8 @@ class HentaiEnvy(
             Genre(
                 it.ownText(),
                 it.attr("href")
-                    .removeSuffix("/").substringAfterLast('/'),
+                    .removeSuffix("/")
+                    .substringAfterLast('/'),
             )
         }
 
@@ -78,5 +81,5 @@ class HentaiEnvy(
         ) + super.getFilterList().list,
     )
 
-    override fun relatedMangaListSelector() = ".related_thumbs ${popularMangaSelector()}"
+    override fun relatedMangaSelector() = ".related_thumbs ${popularMangaSelector()}"
 }

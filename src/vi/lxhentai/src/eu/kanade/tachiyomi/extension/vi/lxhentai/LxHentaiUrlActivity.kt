@@ -11,22 +11,23 @@ class LxHentaiUrlActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val pathSegments = intent?.data?.pathSegments
-        if (pathSegments != null && pathSegments.size > 1) {
-            val id = pathSegments[1]
+        val data = intent?.data
+        if (data != null && data.pathSegments != null && data.pathSegments.size > 1) {
+            val id = data.pathSegments[1]
+            val mainIntent = Intent("eu.kanade.tachiyomi.SEARCH")
+            mainIntent.putExtra("query", LxHentai.PREFIX_ID_SEARCH + id)
+            mainIntent.putExtra("filter", packageName)
+            mainIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
             try {
-                startActivity(
-                    Intent().apply {
-                        action = "eu.kanade.tachiyomi.SEARCH"
-                        putExtra("query", "id:$id")
-                        putExtra("filter", packageName)
-                    },
-                )
+                startActivity(mainIntent)
             } catch (e: ActivityNotFoundException) {
-                Log.e("LxHentaiUrlActivity", e.toString())
+                Log.e("LxHentaiUrlActivity", "Activity not found: " + e.message)
+            } catch (e: Throwable) {
+                Log.e("LxHentaiUrlActivity", "Error: " + e.message)
             }
         } else {
-            Log.e("LxHentaiUrlActivity", "Could not parse URI from intent $intent")
+            Log.e("LxHentaiUrlActivity", "Unable to parse URI: $data")
         }
 
         finish()

@@ -12,13 +12,15 @@ import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import app.cash.quickjs.QuickJs
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.interceptor.rateLimitHost
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
+import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.ParsedHttpSource
+import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.lib.cookieinterceptor.CookieInterceptor
 import keiyoushi.utils.getPreferencesLazy
@@ -40,7 +42,7 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
 class Mangago :
-    ParsedHttpSource(),
+    HttpSource(),
     ConfigurableSource {
 
     override val name = "Mangago"
@@ -55,6 +57,7 @@ class Mangago :
     private val preferences: SharedPreferences by getPreferencesLazy()
 
     override val client = network.cloudflareClient.newBuilder()
+        .rateLimitHost(baseUrl.toHttpUrl(), 1)
         .addInterceptor { chain ->
             val request = chain.request()
             val response = chain.proceed(request)
@@ -90,31 +93,30 @@ class Mangago :
 
     private val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.ENGLISH)
 
-    private fun mangaFromElement(element: Element) = SManga.create().apply {
-        val linkElement = element.selectFirst(".thm-effect")!!
+    private fun mangaFromElement(element: Element): SManga? = SManga.create().apply {
+        val linkElement = element.selectFirst(".thm-effect") ?: return null
 
         setUrlWithoutDomain(linkElement.attr("href"))
-        title = linkElement.attr("title")
+        title = linkElement.attr("title").takeIf(String::isNotBlank) ?: return null
 
-        val thumbnailElem = linkElement.selectFirst("img")!!
-        thumbnail_url = thumbnailElem.attr("abs:data-src").ifBlank { thumbnailElem.attr("abs:src") }
+        val thumbnailElem = linkElement.selectFirst("img")
+        thumbnail_url = thumbnailElem?.attr("abs:data-src")?.takeIf(String::isNotBlank)
+            ?: thumbnailElem?.attr("abs:src")
     }
 
     override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=view&e=", headers)
 
-    override fun popularMangaSelector(): String = genreListingSelector
-
-    override fun popularMangaFromElement(element: Element) = mangaFromElement(element)
-
-    override fun popularMangaNextPageSelector() = genreListingNextPageSelector
+    override fun popularMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select(genreListingSelector)
+            .mapNotNull { mangaFromElement(it) }
+        val hasNextPage = document.selectFirst(genreListingNextPageSelector) != null
+        return MangasPage(mangas, hasNextPage)
+    }
 
     override fun latestUpdatesRequest(page: Int) = GET("$baseUrl/genre/all/$page/?f=1&o=1&sortby=update_date&e=", headers)
 
-    override fun latestUpdatesSelector() = genreListingSelector
-
-    override fun latestUpdatesFromElement(element: Element) = mangaFromElement(element)
-
-    override fun latestUpdatesNextPageSelector() = genreListingNextPageSelector
+    override fun latestUpdatesParse(response: Response) = popularMangaParse(response)
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
         val url = if (query.isNotBlank()) {
@@ -156,11 +158,13 @@ class Mangago :
         return GET(url, headers)
     }
 
-    override fun searchMangaSelector() = "$genreListingSelector, .pic_list > li"
-
-    override fun searchMangaFromElement(element: Element) = mangaFromElement(element)
-
-    override fun searchMangaNextPageSelector() = genreListingNextPageSelector
+    override fun searchMangaParse(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = document.select("$genreListingSelector, .pic_list > li")
+            .mapNotNull { mangaFromElement(it) }
+        val hasNextPage = document.selectFirst(genreListingNextPageSelector) != null
+        return MangasPage(mangas, hasNextPage)
+    }
 
     private val titleRegex: Regex by lazy {
         Regex(
@@ -169,83 +173,94 @@ class Mangago :
         )
     }
 
-    override fun mangaDetailsParse(document: Document) = SManga.create().apply {
-        val matches = mutableListOf<String>()
+    override fun mangaDetailsParse(response: Response): SManga {
+        val document = response.asJsoup()
 
-        fun String.applyRegexRemoval(regex: Regex) = regex.findAll(this)
-            .onEach { matches.add(it.value) }
-            .fold(this) { acc, m -> acc.replace(m.value, "").trim() }
+        return SManga.create().apply {
+            val matches = mutableListOf<String>()
 
-        title = document.selectFirst(".w-title h1")!!.text()
-            .let { if (isRemoveTitleVersion()) it.applyRegexRemoval(titleRegex) else it }
-            .let {
-                customRemoveTitle().takeIf { p -> p.isNotEmpty() }
-                    ?.let { p -> it.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE)) } ?: it
-            }
+            fun String.applyRegexRemoval(regex: Regex) = regex.findAll(this)
+                .onEach { matches.add(it.value) }
+                .fold(this) { acc, m -> acc.replace(m.value, "").trim() }
 
-        document.getElementById("information")!!.let { info ->
-            thumbnail_url = info.selectFirst("img")!!.attr("abs:src")
-            description = info.selectFirst(".manga_summary")?.apply { selectFirst("font")?.remove() }?.text()
-
-            var altTitles = ""
-            info.select(".manga_info li, .manga_right tr").forEach { el ->
-                when (el.selectFirst("b, label")!!.text().lowercase()) {
-                    "alternative:" -> altTitles = el.text().substringAfter(":").trim()
-                    "status:" -> status = when (el.selectFirst("span")!!.text().lowercase()) {
-                        "ongoing" -> SManga.ONGOING
-                        "completed" -> SManga.COMPLETED
-                        else -> SManga.UNKNOWN
-                    }
-                    "author(s):", "author:" -> author = el.select("a").joinToString { it.text() }
-                    "genre(s):" -> genre = el.select("a").joinToString { it.text() }
+            title = document.selectFirst(".w-title h1")!!.text()
+                .let { if (isRemoveTitleVersion()) it.applyRegexRemoval(titleRegex) else it }
+                .let {
+                    customRemoveTitle().takeIf { p -> p.isNotEmpty() }
+                        ?.let { p -> it.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE)) } ?: it
                 }
-            }
 
-            val parsedAltTitles = altTitles
-                .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("N/A", true) }
-                ?.let { t ->
-                    (
-                        if (t.contains(';')) {
-                            t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
-                        } else {
-                            t.trimEnd(',').split(Regex("\\s*,\\s*"))
+            document.getElementById("information")!!.let { info ->
+                thumbnail_url = info.selectFirst("img")!!.attr("abs:src")
+                description = info.selectFirst(".manga_summary")?.apply { selectFirst("font")?.remove() }?.text()
+
+                var altTitles = ""
+                info.select(".manga_info li, .manga_right tr").forEach { el ->
+                    when (el.selectFirst("b, label")!!.text().lowercase()) {
+                        "alternative:" -> altTitles = el.text().substringAfter(":").trim()
+                        "status:" -> status = when (el.selectFirst("span")!!.text().lowercase()) {
+                            "ongoing" -> SManga.ONGOING
+                            "completed" -> SManga.COMPLETED
+                            else -> SManga.UNKNOWN
                         }
-                        )
-                        .filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
+                        "author(s):", "author:" -> author = el.select("a").joinToString { it.text() }
+                        "genre(s):" -> genre = el.select("a").joinToString { it.text() }
+                    }
                 }
 
-            matches.removeAll { it.trim().equals("(Yaoi)", true) }
+                val parsedAltTitles = altTitles
+                    .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("N/A", true) }
+                    ?.let { t ->
+                        (
+                            if (t.contains(';')) {
+                                t.replace(Regex("\\s*(?:;\\s*){2,}"), ";").trimEnd(';').split(Regex("\\s*;\\s*"))
+                            } else {
+                                t.trimEnd(',').split(Regex("\\s*,\\s*"))
+                            }
+                            )
+                            .filter { it.isNotEmpty() }.joinToString("\n- ", prefix = "- ")
+                    }
 
-            description = buildString {
-                description?.let(::append)
-                parsedAltTitles?.let { append("\n\n----\n#### **Alternative Titles**\n$it") }
-                if (matches.isNotEmpty()) append("\n\n----\n#### **Removed from title**\n${matches.joinToString("") { "- `$it`\n" }}")
-            }.trim().ifEmpty { null }
+                matches.removeAll { it.trim().equals("(Yaoi)", true) }
+
+                description = buildString {
+                    description?.let(::append)
+                    parsedAltTitles?.let { append("\n\n----\n#### **Alternative Titles**\n$it") }
+                    if (matches.isNotEmpty()) append("\n\n----\n#### **Removed from title**\n${matches.joinToString("") { m -> "- `$m`\n" }}")
+                }.trim().ifEmpty { null }
+            }
         }
     }
 
-    override fun chapterListSelector(): String = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
+    private fun chapterListSelector(): String = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
         "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
     } else {
         "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
     }
 
-    override fun chapterFromElement(element: Element) = SChapter.create().apply {
-        val link = element.select("a.chico")
+    override fun chapterListParse(response: Response): List<SChapter> {
+        val document = response.asJsoup()
+        return document.select(chapterListSelector())
+            .map { element ->
+                SChapter.create().apply {
+                    val link = element.select("a.chico")
 
-        val urlOriginal = link.attr("href")
-        if (urlOriginal.startsWith("http")) url = urlOriginal else setUrlWithoutDomain(urlOriginal)
-        name = link.text().trim()
-        date_upload = runCatching {
-            dateFormat.parse(element.select("td:last-child").text().trim())?.time
-        }.getOrNull() ?: 0L
-        scanlator = element.selectFirst("td.no a, td.uk-table-shrink a")?.text()?.trim()
-        if (scanlator.isNullOrBlank()) {
-            scanlator = "Unknown"
-        }
+                    val urlOriginal = link.attr("href")
+                    if (urlOriginal.startsWith("http")) url = urlOriginal else setUrlWithoutDomain(urlOriginal)
+                    name = link.text().trim()
+                    date_upload = runCatching {
+                        dateFormat.parse(element.select("td:last-child").text().trim())?.time
+                    }.getOrNull() ?: 0L
+                    scanlator = element.selectFirst("td.no a, td.uk-table-shrink a")?.text()?.trim()
+                    if (scanlator.isNullOrBlank()) {
+                        scanlator = "Unknown"
+                    }
+                }
+            }
     }
 
-    override fun pageListParse(document: Document): List<Page> {
+    override fun pageListParse(response: Response): List<Page> {
+        val document = response.asJsoup()
         val availableImages = getChapterImageUrls(document)
 
         if (availableImages.none { it.isBlank() }) {
@@ -326,8 +341,6 @@ class Mangago :
             ?: throw Exception("Unable to find image for page ${index + 1}")
     }
 
-    override fun imageUrlParse(document: Document): String = throw UnsupportedOperationException()
-
     private fun getChapterImageUrls(document: Document): List<String> {
         val images = document.selectFirst("script:containsData(imgsrcs)")
             ?.data()
@@ -339,7 +352,7 @@ class Mangago :
         val chapterJs = SoJsonV4Deobfuscator.decode(
             client.newCall(
                 GET(chapterJsUrl, headers),
-            ).execute().body.string(),
+            ).execute().use { it.body.string() },
         )
         val key = findHexEncodedVariable(chapterJs, "key").decodeHex()
         val iv = findHexEncodedVariable(chapterJs, "iv").decodeHex()
@@ -397,14 +410,21 @@ class Mangago :
         }
     }
 
-    override fun relatedMangaListSelector() = ".also_like + div .listitem, .also-like li"
-
-    override fun relatedMangaFromElement(element: Element): SManga = element.selectFirst("a[title]")!!.let {
-        SManga.create().apply {
-            title = it.attr("title")
-            setUrlWithoutDomain(it.absUrl("href"))
-            thumbnail_url = element.selectFirst("img")!!.imgAttr()
-        }
+    override fun relatedMangaListParse(response: Response): List<SManga> {
+        val document = response.asJsoup()
+        return document.select("div.pic_list .updatesli, .also-like li")
+            .mapNotNull { element ->
+                element.selectFirst("a[title]")?.let { elm ->
+                    SManga.create().apply {
+                        title = elm.ownText().takeIf(String::isNotBlank)
+                            ?: elm.attr("title").takeIf(String::isNotBlank)
+                                ?: return@mapNotNull null
+                        setUrlWithoutDomain(elm.absUrl("href"))
+                        thumbnail_url = element.selectFirst("img")?.imgAttr()
+                    }
+                }
+                    ?: return@mapNotNull null
+            }
     }
 
     override fun getFilterList(): FilterList = FilterList(

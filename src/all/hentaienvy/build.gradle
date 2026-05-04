@@ -1,9 +1,9 @@
 ext {
     extName = 'HentaiEnvy'
     extClass = '.HentaiEnvyFactory'
-    themePkg = 'galleryadults'
-    baseUrl = 'https://hentaienvy.com'
     overrideVersionCode = 0
+    themePkg = 'galleryadults'
+	baseUrl = 'https://hentaienvy.com'
     isNsfw = true
 }
 

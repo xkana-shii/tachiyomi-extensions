@@ -22,7 +22,7 @@ class HentaiEra(
     override val useIntermediateSearch: Boolean = true
     override val supportSpeechless: Boolean = true
 
-    override fun Element.mangaTitle(selector: String): String? = mangaFullTitle(selector.replace(".caption", ".gallery_title")).let {
+    override fun Element.mangaTitle(selector: String): String? = mangaFullTitle(selector.replace("caption", "gallery_title")).let {
         if (preferences.shortTitle) it?.shortenTitle() else it
     }
 
@@ -30,8 +30,25 @@ class HentaiEra(
         .removeSuffix("/").substringAfterLast("/")
         .let {
             // Include Speechless in search results
-            if (it == LANGUAGE_SPEECHLESS) mangaLang else it
+            if (it == LANGUAGE_SPEECHLESS) mangaLang else null
         }
+        ?: selectFirst(".g_flag")?.classNames()
+            ?.firstOrNull { it.startsWith("flag-") }
+            ?.substringAfter("flag-")
+            ?.let { langFlags[it] }
+        ?: mangaLang
+
+    private val langFlags by lazy {
+        getLanguageURIs()
+            .associateBy({ it.second }, { it.first })
+            .toMutableMap()
+            .apply {
+                // Keep the existing English flag alias in case the site uses `flag-us`
+                if (!containsKey("us")) {
+                    put("us", LANGUAGE_ENGLISH)
+                }
+            }
+    }
 
     override fun popularMangaRequest(page: Int): Request = if (mangaLang.isBlank()) {
         // Popular browsing for LANGUAGE_MULTI
@@ -93,6 +110,4 @@ class HentaiEra(
         SearchFlagFilter("Artist CG", "ac"),
         SearchFlagFilter("Game CG", "gc"),
     )
-
-    override fun relatedMangaListSelector() = ".related_section ${popularMangaSelector()}"
 }

@@ -45,7 +45,7 @@ class Cubari(override val lang: String) :
 
     private val preferences by getPreferencesLazy()
 
-    override val client = network.cloudflareClient.newBuilder()
+    override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
             val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""

@@ -62,9 +62,11 @@ class SearchDto(
         val alternateTitles: List<String> = emptyList(),
     ) {
 
+        // KNS -->
         fun toSManga(domain: String, showSource: Boolean, sources: Map<String, String>, removeExtras: Boolean = false): SManga = SManga.create().apply {
             val cleanTitle = this@Book.title.trim().let { if (removeExtras) it.removeTitleExtras() else it }
             title = if (showSource) "$cleanTitle [${sources[this@Book.sourceId]}]" else cleanTitle
+            // KNS <--
             url = id
             thumbnail_url = coverImage?.let { "$domain/api/v2/image/$it" }
         }
@@ -149,8 +151,10 @@ class DetailsDto(
         val label: String?,
     )
 
+    // KNS -->
     fun toSManga(sourceName: String? = null, baseUrl: String = "", showEdition: Boolean = false, showSource: Boolean = false, removeExtras: Boolean = false): SManga = SManga.create().apply {
         val base = this@DetailsDto.title.trim().let { if (removeExtras) it.removeTitleExtras() else it }
+        // KNS <--
         val withEdition = if (showEdition && !this@DetailsDto.editionInfo.isNullOrBlank()) "$base (${this@DetailsDto.editionInfo})" else base
         title = if (showSource && sourceName != null) "$withEdition [$sourceName]" else withEdition
         val desc = StringBuilder()
@@ -161,7 +165,6 @@ class DetailsDto(
             desc.append("\n")
         }
 
-        // Add alternate titles at the end
         if (seriesAlternateTitles.isNotEmpty()) {
             if (desc.isNotEmpty()) desc.append("\n")
             desc.append("Associated Name(s):\n")
@@ -170,7 +173,6 @@ class DetailsDto(
             }
         }
 
-        // Extract authors and artists from staff (roles like "Author", "Artist", "Story", "Art")
         val authors = seriesStaff.filter {
             it.role.contains("Author", ignoreCase = true) || it.role.contains("Story", ignoreCase = true)
         }.map { it.name }.distinct()
@@ -185,7 +187,9 @@ class DetailsDto(
         author = authors.joinToString()
         description = desc.toString().trim()
         genre = buildList {
+            // KNS -->
             sourceName?.takeIf { it.isNotBlank() }?.let { add(it) }
+            // KNS <--
             this@DetailsDto.format?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(genres.map { it.genreName })
         }.joinToString()
@@ -225,7 +229,9 @@ class ChapterDto(
         val volumeNo: String?,
         val groups: List<Group> = emptyList(),
     ) {
+        // KNS -->
         fun toSChapter(actualSeriesId: String, useSourceChapterNumber: Boolean = false, chapterTitleMode: String = "smart_vol_chapter"): SChapter = SChapter.create().apply {
+            // KNS <--
             url = "/series/$actualSeriesId/reader/$id"
             name = buildChapterName(chapterTitleMode)
             date_upload = dateFormat.tryParse(createdAt)
@@ -235,7 +241,9 @@ class ChapterDto(
             scanlator = groups.joinToString(", ") { it.title }
         }
 
+        // KNS -->
         private fun buildChapterName(mode: String = "smart_vol_chapter"): String {
+            // KNS <--
             val trimmedTitle = title.trim()
             return when (mode) {
                 "always" -> {
@@ -257,6 +265,7 @@ class ChapterDto(
                     }
                 }
 
+                // KNS -->
                 "smart_vol_chapter" -> {
                     val volPart = if (!volumeNo.isNullOrBlank()) "Vol.$volumeNo " else ""
                     val chPart = if (!chapterNo.isNullOrBlank()) "Ch.$chapterNo" else ""
@@ -280,8 +289,10 @@ class ChapterDto(
                         }
                     }
                 }
+                // KNS <--
 
                 else -> {
+                    // KNS -->
                     if (chapterNo.isNullOrBlank()) return trimmedTitle
                     if (trimmedTitle.isEmpty()) return "Ch.$chapterNo"
 
@@ -299,6 +310,7 @@ class ChapterDto(
                     }
 
                     "Ch.$chapterNo $trimmedTitle"
+                    // KNS <--
                 }
             }
         }
@@ -312,6 +324,7 @@ class ChapterDto(
     companion object {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)
 
+        // KNS -->
         val SMART_KEYWORDS = listOf(
             "hiatus", "special episode", "season", "special", "finale",
             "bonus", "romantasy au", "historical au", "side story",
@@ -329,6 +342,7 @@ class ChapterDto(
         )
 
         val SMART_LEADING_NUMBER_REGEX = Regex("^(\\d+)(?:[.:\\-\\s].*|$)")
+        // KNS <--
     }
 }
 
@@ -338,16 +352,30 @@ class ChallengeDto(
     val accessToken: String,
     @SerialName("cache_url")
     val cacheUrl: String,
-    val pages: List<PageDto>,
+    val manifest: ManifestDto? = null,
+    val pages: List<PageDto>? = null,
+)
+
+@Serializable
+class ManifestDto(
+    val pages: List<PageDto> = emptyList(),
 )
 
 @Serializable
 class PageDto(
     @SerialName("page_number")
-    val pageNumber: Int,
+    private val pageNumberOld: Int? = null,
+    @SerialName("page_no")
+    private val pageNumberNew: Int? = null,
     @SerialName("page_uuid")
-    val pageUuid: String,
-)
+    private val pageUuidOld: String? = null,
+    @SerialName("page_id")
+    private val pageUuidNew: String? = null,
+    val ext: String? = null,
+) {
+    val pageNumber: Int get() = pageNumberNew ?: pageNumberOld ?: 0
+    val pageUuid: String get() = pageUuidNew ?: pageUuidOld ?: ""
+}
 
 @Serializable
 class IntegrityDto(
@@ -355,6 +383,7 @@ class IntegrityDto(
     val exp: Long,
 )
 
+// KNS -->
 private val TITLE_EXTRAS_KEYWORDS = listOf(
     "mature",
     "full ver",
@@ -376,3 +405,4 @@ private val WHITESPACE_REGEX = Regex("\\s+")
 internal fun String.removeTitleExtras(): String = TITLE_EXTRAS_REGEX.replace(this, "")
     .replace(WHITESPACE_REGEX, " ")
     .trim { it.isWhitespace() || it == '-' || it == ':' }
+// KNS <--

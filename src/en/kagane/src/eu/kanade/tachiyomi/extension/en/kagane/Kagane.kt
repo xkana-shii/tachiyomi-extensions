@@ -63,7 +63,7 @@ class Kagane :
 
     override val name = "Kagane"
 
-    private val domain = "kagane.org"
+    private val domain = "kagane.to"
     private val apiUrl = "https://yuzuki.$domain"
     override val baseUrl = "https://$domain"
 
@@ -97,7 +97,7 @@ class Kagane :
                 .build(),
         )
 
-        if (response.code == 401 || response.code == 507) {
+        if (response.code == 401 || response.code == 403 || response.code == 507) {
             response.close()
             val challenge = try {
                 getChallengeResponse(chapterId)
@@ -119,7 +119,9 @@ class Kagane :
     // ============================== Popular ===============================
 
     override fun popularMangaRequest(page: Int): Request {
+        // KNS -->
         ensureMetadataSync()
+        // KNS <--
         return searchMangaRequest(
             page,
             "",
@@ -138,7 +140,9 @@ class Kagane :
     // =============================== Latest ===============================
 
     override fun latestUpdatesRequest(page: Int): Request {
+        // KNS -->
         ensureMetadataSync()
+        // KNS <--
         return searchMangaRequest(
             page,
             "",
@@ -157,7 +161,9 @@ class Kagane :
     // =============================== Search ===============================
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+        // KNS -->
         ensureMetadataSync()
+        // KNS <--
         val body = buildJsonObject {
             if (query.isNotBlank()) {
                 put("title", query)
@@ -281,7 +287,9 @@ class Kagane :
     override fun searchMangaParse(response: Response): MangasPage {
         val dto = response.parseAs<SearchDto>()
         val sources = getSourcesMap()
+        // KNS -->
         val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources, preferences.removeTitleExtras) }
+        // KNS <--
         return MangasPage(mangas, hasNextPage = dto.hasNextPage())
     }
 
@@ -343,7 +351,9 @@ class Kagane :
                     null
                 }
         }
+        // KNS -->
         return dto.toSManga(sourceName, baseUrl, preferences.showEdition, preferences.showSource, preferences.removeTitleExtras)
+        // KNS <--
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = mangaDetailsRequest(manga.url)
@@ -400,10 +410,17 @@ class Kagane :
         accessToken = challengeResp.accessToken
         cacheUrl = challengeResp.cacheUrl
 
-        val pages = challengeResp.pages.map { page ->
-            val pageUrl = "$cacheUrl/api/v2/books/file".toHttpUrl().newBuilder().apply {
+        val isNewApi = challengeResp.manifest != null
+        val pageList = challengeResp.manifest?.pages ?: challengeResp.pages ?: emptyList()
+
+        val pages = pageList.map { page ->
+            val pageUrl = "$cacheUrl/api/v2/books/${if (isNewApi) "page" else "file"}".toHttpUrl().newBuilder().apply {
                 addPathSegment(chapterId)
-                addPathSegment(page.pageUuid)
+                if (isNewApi) {
+                    addPathSegment("${page.pageUuid}.${page.ext ?: "jxl"}")
+                } else {
+                    addPathSegment(page.pageUuid)
+                }
                 addQueryParameter("token", accessToken)
                 addQueryParameter("is_datasaver", preferences.dataSaver.toString())
             }.build().toString()
@@ -423,23 +440,48 @@ class Kagane :
 
     private fun getIntegrityToken(): String {
         if (integrityExp < System.currentTimeMillis()) {
+            // Make a GET request to the base URL first to ensure Cloudflare is bypassed on a normal HTML page.
+            // Bypassing Cloudflare directly on the POST /api/integrity endpoint can cause the WebView to crash.
+            client.newCall(GET("$baseUrl/", headers)).execute().close()
+
             val res = client.newCall(
                 POST(
-                    "https://kagane.org/api/integrity",
-                    headers,
+                    "$baseUrl/api/integrity",
+                    apiHeaders,
                     body = "".toRequestBody("application/json".toMediaType()),
                 ),
-            ).execute().parseAs<IntegrityDto>()
-            integrityToken = res.token
-            integrityExp = res.exp * 1000
+            ).execute()
+
+            val dto = res.parseAs<IntegrityDto>()
+            integrityToken = dto.token
+            integrityExp = dto.exp * 1000
         }
 
         return integrityToken
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
     private fun getChallengeResponse(chapterId: String): ChallengeDto {
         val integrityToken = getIntegrityToken()
+
+        val challengeUrl =
+            "$apiUrl/api/v2/books/$chapterId".toHttpUrl().newBuilder()
+                .addQueryParameter("is_datasaver", preferences.dataSaver.toString())
+                .build()
+
+        val challengeBody = "{}".toRequestBody("application/json".toMediaType())
+
+        val headers = apiHeaders.newBuilder().add("x-integrity-token", integrityToken).build()
+
+        val response = client.newCall(POST(challengeUrl.toString(), headers, challengeBody)).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            return getChallengeResponseWithDrm(chapterId, integrityToken)
+        }
+
+        return response.parseAs<ChallengeDto>()
+    }
+
+    private fun getChallengeResponseWithDrm(chapterId: String, integrityToken: String): ChallengeDto {
         val f = ":$chapterId".sha256().sliceArray(0 until 16)
 
         val challenge = if (preferences.wvd.isNotBlank()) {
@@ -469,6 +511,7 @@ class Kagane :
         return cdm.getLicenseChallenge(pssh)
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private fun getChallengeWebview(f: ByteArray, chapterId: String): String {
         val interfaceName = "jsInterface"
         val html = """
@@ -671,8 +714,10 @@ class Kagane :
     private val SharedPreferences.chapterTitleMode
         get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
+    // KNS -->
     private val SharedPreferences.removeTitleExtras: Boolean
         get() = this.getBoolean(REMOVE_TITLE_EXTRAS, false)
+    // KNS <--
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
@@ -735,12 +780,14 @@ class Kagane :
             setDefaultValue(WVD_DEFAULT)
         }.let(screen::addPreference)
 
+        // KNS -->
         SwitchPreferenceCompat(screen.context).apply {
             key = REMOVE_TITLE_EXTRAS
             title = "Remove extra tags from titles"
             summary = "Remove bracketed or parenthetical tags (e.g. [mature], (full ver.)) from manga titles"
             setDefaultValue(false)
         }.let(screen::addPreference)
+        // KNS <--
 
         ListPreference(screen.context).apply {
             key = CHAPTER_TITLE_MODE
@@ -780,21 +827,33 @@ class Kagane :
         private const val WVD_KEY = "wvd_key"
         private const val WVD_DEFAULT = ""
 
+        // KNS -->
         private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
+        // KNS <--
 
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
+        // KNS -->
         private const val CHAPTER_TITLE_MODE_DEFAULT = "smart_vol_chapter"
+        // KNS <--
         internal val CHAPTER_TITLE_MODES = arrayOf(
+            // KNS -->
             "smart_vol_chapter",
+            // KNS <--
             "always",
             "vol_chapter",
+            // KNS -->
             "smart",
+            // KNS <--
         )
         internal val CHAPTER_TITLE_MODE_NAMES = arrayOf(
+            // KNS -->
             "Smart Vol.X Ch.Y + title",
+            // KNS <--
             "Ch.X + title (e.g. 'Ch.5 Manga Title')",
             "Vol.X Ch.Y + title (e.g. 'Vol.1 Ch.5 Manga Title')",
+            // KNS -->
             "Smart",
+            // KNS <--
         )
     }
 
@@ -811,7 +870,9 @@ class Kagane :
         }.build()
 
     override fun getFilterList(): FilterList {
+        // KNS -->
         ensureMetadataSync()
+        // KNS <--
 
         val filters: MutableList<Filter<*>> = mutableListOf(
             SortFilter(),
@@ -855,6 +916,7 @@ class Kagane :
         return FilterList(filters)
     }
 
+    // KNS -->
     private fun ensureMetadataSync() {
         if (metadata != null) return
 
@@ -888,6 +950,7 @@ class Kagane :
             Log.e(name, "Failed to synchronously fetch metadata", e)
         }
     }
+    // KNS <--
 
     private fun fetchMetadata() {
         kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {

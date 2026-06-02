@@ -832,8 +832,10 @@ class Kagane :
         // KNS <--
 
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
+
         // KNS -->
         private const val CHAPTER_TITLE_MODE_DEFAULT = "smart_vol_chapter"
+
         // KNS <--
         internal val CHAPTER_TITLE_MODES = arrayOf(
             // KNS -->

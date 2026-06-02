@@ -419,7 +419,7 @@ class Mangago :
                     SManga.create().apply {
                         title = elm.ownText().takeIf(String::isNotBlank)
                             ?: elm.attr("title").takeIf(String::isNotBlank)
-                                ?: return@mapNotNull null
+                            ?: return@mapNotNull null
                         setUrlWithoutDomain(elm.absUrl("href"))
                         thumbnail_url = element.selectFirst("img")?.imgAttr()
                     }

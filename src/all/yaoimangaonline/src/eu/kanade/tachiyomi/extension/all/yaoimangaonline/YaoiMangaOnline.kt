@@ -13,7 +13,6 @@ import eu.kanade.tachiyomi.util.asJsoup
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
 class YaoiMangaOnline : HttpSource() {
@@ -152,8 +151,7 @@ class YaoiMangaOnline : HttpSource() {
 
     // =================== Search ===================
 
-    private fun searchMangaSelector() =
-        ".post:not(.category-gay-movies):not(.category-yaoi-anime):not(.sticky) > div > a"
+    private fun searchMangaSelector() = ".post:not(.category-gay-movies):not(.category-yaoi-anime):not(.sticky) > div > a"
 
     private fun searchMangaNextPageSelector() = ".herald-pagination > .next"
 

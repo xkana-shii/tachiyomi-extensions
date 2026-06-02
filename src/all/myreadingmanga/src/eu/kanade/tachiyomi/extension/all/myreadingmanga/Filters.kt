@@ -17,19 +17,20 @@ internal class TagFilter(popTags: Array<Pair<String, String>>) : UriSelectFilter
 internal class CatFilter(catIds: Array<Pair<String, String>>) : UriSelectFilter("Categories", "ep_filter_category", arrayOf(Pair("Any", ""), *catIds))
 internal class PairingFilter(pairs: Array<Pair<String, String>>) : UriSelectFilter("Pairing", "ep_filter_pairing", arrayOf(Pair("Any", ""), *pairs))
 internal class ScanGroupFilter(groups: Array<Pair<String, String>>) : UriSelectFilter("Scanlation Group", "ep_filter_group", arrayOf(Pair("Any", ""), *groups))
-internal class StatusFilter : UriSelectFilter(
-    "Status",
-    "ep_filter_status",
-    arrayOf(
-        Pair("Any", ""),
-        Pair("Completed", "completed"),
-        Pair("Ongoing", "ongoing"),
-        Pair("Licensed", "licensed"),
-        Pair("Dropped", "dropped"),
-        Pair("Hiatus", "hiatus"),
-        Pair("Discontinued", "discontinued"),
-    ),
-)
+internal class StatusFilter :
+    UriSelectFilter(
+        "Status",
+        "ep_filter_status",
+        arrayOf(
+            Pair("Any", ""),
+            Pair("Completed", "completed"),
+            Pair("Ongoing", "ongoing"),
+            Pair("Licensed", "licensed"),
+            Pair("Dropped", "dropped"),
+            Pair("Hiatus", "hiatus"),
+            Pair("Discontinued", "discontinued"),
+        ),
+    )
 internal class SearchSortTypeList : Filter.Select<String>("Sort by", arrayOf("Newest", "Oldest", "Random", "More relevant"))
 
 /**

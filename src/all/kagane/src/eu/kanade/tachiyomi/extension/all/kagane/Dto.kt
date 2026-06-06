@@ -126,6 +126,8 @@ class DetailsDto(
     val editionInfo: String? = null,
     @SerialName("tracker_id")
     val trackerId: String? = null,
+    @SerialName("series_covers")
+    val covers: List<SeriesCover> = emptyList(),
 ) {
     @Serializable
     class SeriesStaff(
@@ -151,12 +153,17 @@ class DetailsDto(
         val label: String?,
     )
 
-    // KNS -->
+    @Serializable
+    class SeriesCover(
+        @SerialName("image_id")
+        val imageId: String,
+    )
+
     fun toSManga(sourceName: String? = null, baseUrl: String = "", showEdition: Boolean = false, showSource: Boolean = false, removeExtras: Boolean = false): SManga = SManga.create().apply {
         val base = this@DetailsDto.title.trim().let { if (removeExtras) it.removeTitleExtras() else it }
-        // KNS <--
         val withEdition = if (showEdition && !this@DetailsDto.editionInfo.isNullOrBlank()) "$base (${this@DetailsDto.editionInfo})" else base
         title = if (showSource && sourceName != null) "$withEdition [$sourceName]" else withEdition
+        thumbnail_url = covers.firstOrNull()?.imageId?.let { "$domain/api/v2/image/$it" }
         val desc = StringBuilder()
 
         // Add main description

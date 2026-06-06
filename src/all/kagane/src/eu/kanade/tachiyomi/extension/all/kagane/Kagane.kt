@@ -335,9 +335,7 @@ abstract class Kagane(
                     null
                 }
         }
-        // KNS -->
-        return dto.toSManga(sourceName, baseUrl, preferences.showEdition, preferences.showSource, preferences.removeTitleExtras)
-        // KNS <--
+        return dto.toSManga(apiUrl, sourceName, baseUrl, preferences.showEdition, preferences.showSource, preferences.removeTitleExtras)
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = mangaDetailsRequest(manga.url)

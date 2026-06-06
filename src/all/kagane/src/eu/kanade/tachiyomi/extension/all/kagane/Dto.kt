@@ -159,7 +159,7 @@ class DetailsDto(
         val imageId: String,
     )
 
-    fun toSManga(sourceName: String? = null, baseUrl: String = "", showEdition: Boolean = false, showSource: Boolean = false, removeExtras: Boolean = false): SManga = SManga.create().apply {
+    fun toSManga(domain: String, sourceName: String? = null, baseUrl: String = "", showEdition: Boolean = false, showSource: Boolean = false, removeExtras: Boolean = false): SManga = SManga.create().apply {
         val base = this@DetailsDto.title.trim().let { if (removeExtras) it.removeTitleExtras() else it }
         val withEdition = if (showEdition && !this@DetailsDto.editionInfo.isNullOrBlank()) "$base (${this@DetailsDto.editionInfo})" else base
         title = if (showSource && sourceName != null) "$withEdition [$sourceName]" else withEdition

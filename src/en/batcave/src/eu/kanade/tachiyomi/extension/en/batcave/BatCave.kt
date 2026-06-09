@@ -32,7 +32,7 @@ abstract class BatCave : HttpSource() {
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
-    // Use cloudflareClient to sync cookies with WebView and intercept the DLE Guard redirect.
+    // Use client to sync cookies with WebView and intercept the DLE Guard redirect.
     override val client = network.client.newBuilder()
         .addInterceptor(DleGuardResolver.interceptor(baseUrl))
         .build()

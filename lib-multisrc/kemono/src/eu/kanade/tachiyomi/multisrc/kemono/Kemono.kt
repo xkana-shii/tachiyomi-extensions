@@ -1,11 +1,17 @@
 package eu.kanade.tachiyomi.multisrc.kemono
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
+import android.widget.Toast
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.multisrc.kemono.KemonoCreatorDto.Companion.serviceName
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -17,8 +23,13 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.network.rateLimit
 import keiyoushi.utils.getPreferences
 import keiyoushi.utils.parseAs
+import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.CacheControl
+import okhttp3.FormBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.brotli.BrotliInterceptor
@@ -27,17 +38,42 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import java.io.File
 import java.lang.Thread.sleep
+import java.net.URLEncoder
 import java.util.TimeZone
 import kotlin.math.min
 import kotlin.time.Duration.Companion.minutes
 
 open class Kemono(
     override val name: String,
-    override val baseUrl: String,
+    private val defaultBaseUrl: String,
     override val lang: String = "all",
 ) : HttpSource(),
     ConfigurableSource {
     override val supportsLatest = true
+
+    override val baseUrl: String
+        get() = preferences.getString(BASE_URL_PREF, defaultBaseUrl) ?: defaultBaseUrl
+
+    private val credentials: Credential
+        get() = Credential(
+            username = preferences.getString(PAWCHIVE_USERNAME_PREF, "") ?: "",
+            password = preferences.getString(PAWCHIVE_PASSWORD_PREF, "") ?: "",
+        )
+
+    private data class Credential(val username: String, val password: String)
+
+    @Volatile
+    private var loginState = LoginState.UNKNOWN
+
+    private val loginLock = Any()
+
+    private enum class LoginState {
+        UNKNOWN,
+        LOGGED_IN,
+        FAILED,
+    }
+
+    private val kemonoBaseUrl: String = "https://kemono.cr"
 
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
@@ -48,6 +84,7 @@ open class Kemono(
                 chain.proceed(request)
             }
         }
+        .addInterceptor(::loginInterceptor)
         .apply {
             val index = networkInterceptors().indexOfFirst { it is BrotliInterceptor }
             if (index >= 0) interceptors().add(networkInterceptors().removeAt(index))
@@ -74,9 +111,145 @@ open class Kemono(
 
     private val dataPath = "data"
 
-    private val imgCdnUrl = baseUrl.replace("//", "//img.")
+    private val dataBaseUrl: String
+        get() {
+            val url = baseUrl.trimEnd('/')
+            return when {
+                url.contains("://pawchive.", ignoreCase = true) -> {
+                    url.replace("://pawchive.", "://file.pawchive.", ignoreCase = true)
+                }
+                else -> url
+            }
+        }
+
+    private val imgCdnUrl: String
+        get() = baseUrl.replace("//", "//img.")
+
+    private val kemonoImgCdnUrl: String
+        get() = kemonoBaseUrl.replace("//", "//img.")
 
     private fun String.formatAvatarUrl(): String = removePrefix("https://").replaceBefore('/', imgCdnUrl)
+
+    // For thumbnails, always use Kemono CDN
+    private fun String.formatAvatarUrlThumbnail(): String = removePrefix("https://").replaceBefore('/', kemonoImgCdnUrl)
+
+    private fun String.encodeQueryValue(): String = URLEncoder.encode(this, Charsets.UTF_8.name()).replace("+", "%20")
+
+    private fun String.asPawchiveFileUrl(): String {
+        val normalizedHost = when {
+            contains("://pawchive.", ignoreCase = true) -> {
+                replace("://pawchive.", "://file.pawchive.", ignoreCase = true)
+            }
+            else -> this
+        }
+
+        val parsed = normalizedHost.toHttpUrlOrNull() ?: return normalizedHost
+        val fileName = parsed.queryParameter("f") ?: return normalizedHost
+
+        return parsed.newBuilder()
+            .removeAllQueryParameters("f")
+            .addEncodedQueryParameter("f", fileName.encodeQueryValue())
+            .build()
+            .toString()
+    }
+
+    private fun buildDataUrl(pathWithFileName: String): String {
+        val rawPath = pathWithFileName.substringBefore("?f=")
+        val path = if (rawPath.startsWith("/")) rawPath else "/$rawPath"
+        val fileName = pathWithFileName.substringAfter("?f=", missingDelimiterValue = "")
+
+        val builder = "${dataBaseUrl.trimEnd('/')}/$dataPath$path"
+            .toHttpUrl()
+            .newBuilder()
+
+        if (fileName.isNotBlank()) {
+            builder.addEncodedQueryParameter("f", fileName.encodeQueryValue())
+        }
+
+        return builder.build().toString()
+    }
+
+    private fun resetLoginState() {
+        loginState = LoginState.UNKNOWN
+    }
+
+    private fun shouldAutoLogin(): Boolean {
+        val loginCredentials = credentials
+        return baseUrl.contains("://pawchive.", ignoreCase = true) &&
+            loginCredentials.username.isNotBlank() &&
+            loginCredentials.password.isNotBlank()
+    }
+
+    private fun loginInterceptor(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+
+        if (!shouldAutoLogin()) {
+            return chain.proceed(request)
+        }
+
+        if (loginState == LoginState.UNKNOWN) {
+            synchronized(loginLock) {
+                if (loginState == LoginState.UNKNOWN) {
+                    loginState = if (performLogin()) LoginState.LOGGED_IN else LoginState.FAILED
+                }
+            }
+        }
+
+        return chain.proceed(request)
+    }
+
+    private fun performLogin(): Boolean {
+        val loginCredentials = credentials
+
+        if (loginCredentials.username.isBlank() || loginCredentials.password.isBlank()) {
+            return false
+        }
+
+        return try {
+            val loginForm = FormBody.Builder()
+                .add("username", loginCredentials.username)
+                .add("password", loginCredentials.password)
+                .add("location", "/artists")
+                .build()
+
+            val loginRequest = POST("$baseUrl/account/login", headers, loginForm)
+            network.client.newCall(loginRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    showLoginFailedToast()
+                    return false
+                }
+            }
+
+            val checkRequest = GET(
+                "$baseUrl/$apiPath/account/favorites",
+                headers.newBuilder().set("Accept", "text/css").build(),
+            )
+            network.client.newCall(checkRequest).execute().use { response ->
+                response.isSuccessful.also { success ->
+                    if (!success) {
+                        showLoginFailedToast()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            showLoginFailedToast()
+            false
+        }
+    }
+
+    private fun showLoginFailedToast() {
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(
+                Injekt.get<Application>(),
+                "Pawchive login failed. Please check your username/email and password.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+    }
 
     override fun popularMangaRequest(page: Int) = throw UnsupportedOperationException()
 
@@ -136,7 +309,8 @@ open class Kemono(
                 val response = client.newCall(GET("$baseUrl/$apiPath/account/favorites", headers)).execute()
 
                 if (response.isSuccessful) {
-                    response.parseAs<List<KemonoFavoritesDto>>().filterNot { it.service.lowercase() == "discord" }
+                    val favs = response.parseAs<List<KemonoFavoritesDto>>().filterNot { it.service.lowercase() == "discord" }
+                    favs
                 } else {
                     response.close()
                     val message = if (response.code == 401) "You are not logged in" else "HTTP error ${response.code}"
@@ -146,8 +320,9 @@ open class Kemono(
                 emptyList()
             }
 
+            val creatorUrl = "$baseUrl/$apiPath/creators"
             val request = GET(
-                "$baseUrl/$apiPath/creators",
+                creatorUrl,
                 headers,
                 CacheControl.Builder().maxStale(30.minutes).build(),
             )
@@ -157,7 +332,8 @@ open class Kemono(
                 throw Exception("HTTP error ${response.code}")
             }
             val allCreators = response.parseAs<List<KemonoCreatorDto>>().filterNot { it.service.lowercase() == "discord" }
-            allCreators.filter {
+
+            val filtered = allCreators.filter {
                 val includeType = typeIncluded.isEmpty() || typeIncluded.contains(it.service.serviceName().lowercase())
                 val excludeType = typeExcluded.isNotEmpty() && typeExcluded.contains(it.service.serviceName().lowercase())
 
@@ -172,6 +348,7 @@ open class Kemono(
                 includeType && !excludeType && isFavorited &&
                     regularSearch
             }
+            filtered
         }
 
         val sorted = when (sort.first) {
@@ -220,7 +397,7 @@ open class Kemono(
         val fromIndex = (page - 1) * PAGE_CREATORS_LIMIT
         val toIndex = min(maxIndex, fromIndex + PAGE_CREATORS_LIMIT)
 
-        val final = sorted.subList(fromIndex, toIndex).map { it.toSManga(imgCdnUrl) }
+        val final = sorted.subList(fromIndex, toIndex).map { it.toSManga(kemonoImgCdnUrl) }
         return MangasPage(final, toIndex != maxIndex)
     }
 
@@ -228,7 +405,7 @@ open class Kemono(
     override fun searchMangaParse(response: Response) = throw UnsupportedOperationException()
 
     override fun fetchMangaDetails(manga: SManga): Observable<SManga> {
-        manga.thumbnail_url = manga.thumbnail_url!!.formatAvatarUrl()
+        manga.thumbnail_url = manga.thumbnail_url!!.formatAvatarUrlThumbnail()
         return Observable.just(manga)
     }
 
@@ -243,13 +420,22 @@ open class Kemono(
         }
         val prefMaxPost = preferences.getString(POST_PAGES_PREF, POST_PAGES_DEFAULT)!!
             .toInt().coerceAtMost(POST_PAGES_MAX) * PAGE_POST_LIMIT
+
         var offset = 0
         var hasNextPage = true
         val result = ArrayList<SChapter>()
         while (offset < prefMaxPost && hasNextPage) {
-            val request = GET("$baseUrl/$apiPath${manga.url}/posts?o=$offset", headers)
-            val page: List<KemonoPostDto> = retry(request).parseAs()
-            page.forEach { post -> if (post.images.isNotEmpty()) result.add(post.toSChapter()) }
+            val postsUrl = "$baseUrl/$apiPath${manga.url}/posts?o=$offset"
+            val request = GET(postsUrl, headers)
+            val response = retry(request)
+            val page: List<KemonoPostDto> = response.parseAs()
+
+            page.forEach { post ->
+                if (post.images.isNotEmpty()) {
+                    result.add(post.toSChapter())
+                }
+            }
+
             offset += PAGE_POST_LIMIT
             hasNextPage = page.size == PAGE_POST_LIMIT
         }
@@ -258,9 +444,11 @@ open class Kemono(
 
     private fun retry(request: Request): Response {
         var code = 0
-        repeat(5) {
+        repeat(5) { attempt ->
             val response = client.newCall(request).execute()
-            if (response.isSuccessful) return response
+            if (response.isSuccessful) {
+                return response
+            }
             response.close()
             code = response.code
             if (code == 429) {
@@ -275,14 +463,52 @@ open class Kemono(
     override fun pageListRequest(chapter: SChapter): Request = GET("$baseUrl/$apiPath${chapter.url}", headers)
 
     override fun pageListParse(response: Response): List<Page> {
-        val postData: KemonoPostDtoWrapped = response.parseAs()
-        return postData.post.images.mapIndexed { i, path -> Page(i, imageUrl = "$baseUrl/$dataPath$path") }
+        val responseBody = response.body!!.string()
+
+        // Try parsing as wrapped (Kemono) first, then as direct post (Pawchive)
+        val post = try {
+            val wrapped = json.decodeFromString<KemonoPostDtoWrapped>(responseBody)
+            wrapped.post ?: run {
+                json.decodeFromString<KemonoPostDto>(responseBody)
+            }
+        } catch (_: Exception) {
+            json.decodeFromString<KemonoPostDto>(responseBody)
+        }
+
+        val pages = post.images.mapIndexed { i, path ->
+            val imageUrl = buildDataUrl(path)
+            Page(i, imageUrl = imageUrl)
+        }
+        return pages
+    }
+
+    private fun String.asPawchiveThumbnailUrl(): String {
+        val fileUrl = asPawchiveFileUrl()
+        val parsed = fileUrl.toHttpUrlOrNull() ?: return fileUrl
+
+        if (!parsed.host.contains("file.pawchive.", ignoreCase = true)) {
+            return fileUrl
+        }
+
+        val thumbnailHost = parsed.host.replace("file.pawchive.", "img.pawchive.", ignoreCase = true)
+        val dataPath = parsed.encodedPath.removePrefix("/thumbnail")
+
+        // Pawchive thumbnails are served without the ?f= filename query.
+        // Example: https://img.pawchive.st/thumbnail/data/c4/ad/hash.gif
+        return "${parsed.scheme}://$thumbnailHost/thumbnail$dataPath"
     }
 
     override fun imageRequest(page: Page): Request {
-        val imageUrl = page.imageUrl!!
+        val imageUrl = page.imageUrl!!.asPawchiveFileUrl()
 
-        if (!preferences.getBoolean(USE_LOW_RES_IMG, false)) return GET(imageUrl, headers)
+        if (!preferences.getBoolean(USE_LOW_RES_IMG, false)) {
+            return GET(imageUrl, headers)
+        }
+
+        if (imageUrl.contains("://file.pawchive.", ignoreCase = true)) {
+            val url = imageUrl.asPawchiveThumbnailUrl()
+            return GET(url, headers)
+        }
 
         val index = imageUrl.indexOf('/', 8)
         val url = buildString {
@@ -296,6 +522,42 @@ open class Kemono(
     override fun imageUrlParse(response: Response) = throw UnsupportedOperationException()
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        ListPreference(screen.context).apply {
+            key = BASE_URL_PREF
+            title = "Domain/Mirror"
+            summary = "Select which domain to use\nCurrently: %s"
+            entryValues = arrayOf("https://kemono.cr", "https://pawchive.st")
+            entries = arrayOf("Kemono", "Pawchive")
+            setDefaultValue(defaultBaseUrl)
+            setOnPreferenceChangeListener { _, _ ->
+                resetLoginState()
+                true
+            }
+        }.let { screen.addPreference(it) }
+
+        EditTextPreference(screen.context).apply {
+            key = PAWCHIVE_USERNAME_PREF
+            title = "Pawchive username/email"
+            summary = "Optional. Used only when the selected mirror is Pawchive."
+            setOnPreferenceChangeListener { _, _ ->
+                resetLoginState()
+                true
+            }
+        }.let { screen.addPreference(it) }
+
+        EditTextPreference(screen.context).apply {
+            key = PAWCHIVE_PASSWORD_PREF
+            title = "Pawchive password"
+            summary = "Optional. Used only when the selected mirror is Pawchive."
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+            setOnPreferenceChangeListener { _, _ ->
+                resetLoginState()
+                true
+            }
+        }.let { screen.addPreference(it) }
+
         ListPreference(screen.context).apply {
             key = POST_PAGES_PREF
             title = "Maximum posts to load"
@@ -336,7 +598,7 @@ open class Kemono(
         Pair("Date Favorited", "fav"),
     )
 
-    internal open class TypeFilter(name: String, vals: List<String>) :
+    open class TypeFilter(name: String, vals: List<String>) :
         Filter.Group<TriFilter>(
             name,
             vals.map { TriFilter(it, it.lowercase()) },
@@ -348,7 +610,7 @@ open class Kemono(
             listOf(TriFilter("Favorites Only", "fav")),
         )
 
-    internal open class TriFilter(name: String, val value: String) : Filter.TriState(name)
+    open class TriFilter(name: String, val value: String) : Filter.TriState(name)
 
     internal open class SortFilter(name: String, selection: Selection, private val vals: List<Pair<String, String>>) : Filter.Sort(name, vals.map { it.first }.toTypedArray(), selection) {
         fun getValue() = vals[state!!.index].second
@@ -363,7 +625,9 @@ open class Kemono(
         private const val POST_PAGES_DEFAULT = "1"
         private const val POST_PAGES_MAX = 75
 
-        // private const val BASE_URL_PREF = "BASE_URL"
+        private const val BASE_URL_PREF = "BASE_URL"
+        private const val PAWCHIVE_USERNAME_PREF = "PAWCHIVE_USERNAME"
+        private const val PAWCHIVE_PASSWORD_PREF = "PAWCHIVE_PASSWORD"
         private const val USE_LOW_RES_IMG = "USE_LOW_RES_IMG"
     }
 }

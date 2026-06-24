@@ -55,7 +55,7 @@ class KemonoCreatorDto(
 
 @Serializable
 class KemonoPostDtoWrapped(
-    val post: KemonoPostDto,
+    val post: KemonoPostDto? = null,
 )
 
 @Serializable
@@ -67,19 +67,29 @@ class KemonoPostDto(
     private val added: String?,
     private val published: String?,
     private val edited: String?,
-    private val file: KemonoFileDto,
-    private val attachments: List<KemonoAttachmentDto>,
+    private val file: KemonoFileDto = KemonoFileDto(),
+    private val attachments: List<KemonoAttachmentDto> = emptyList(),
 ) {
     val images: List<String>
-        get() = buildList(attachments.size + 1) {
-            if (file.path != null) add(KemonoAttachmentDto(file.name, file.path))
-            addAll(attachments)
-        }.filter {
-            when (it.path.substringAfterLast('.').lowercase()) {
-                "png", "jpg", "gif", "jpeg", "webp" -> true
-                else -> false
-            }
-        }.distinctBy { it.path }.map { it.toString() }
+        get() {
+            val result = buildList(attachments.size + 1) {
+                if (file.path != null) {
+                    add(KemonoAttachmentDto(file.name, file.path))
+                }
+                addAll(attachments)
+            }.filter { attachment ->
+                attachment.path?.let { path ->
+                    val ext = path.substringAfterLast('.').lowercase()
+                    val isImage = when (ext) {
+                        "png", "jpg", "gif", "jpeg", "webp" -> true
+                        else -> false
+                    }
+                    isImage
+                } ?: false
+            }.distinctBy { it.path }.map { it.toString() }
+
+            return result
+        }
 
     fun toSChapter() = SChapter.create().apply {
         val postDate = dateFormat.tryParse(edited ?: published ?: added)
@@ -107,9 +117,10 @@ class KemonoPostDto(
 class KemonoFileDto(val name: String? = null, val path: String? = null)
 
 // name might have ".jpe" extension for JPEG, path might have ".m4v" extension for MP4
+// path is optional because some APIs (like Pawchive) may return attachments without paths
 @Serializable
-class KemonoAttachmentDto(var name: String? = null, val path: String) {
-    override fun toString() = path + if (name != null) "?f=$name" else ""
+class KemonoAttachmentDto(var name: String? = null, val path: String? = null) {
+    override fun toString() = (path ?: "") + if (name != null) "?f=$name" else ""
 }
 
 private fun getApiDateFormat() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)

@@ -413,27 +413,25 @@ class Patreon :
         throw Exception("Could not find campaign ID. Try searching with the numeric campaign ID instead.")
     }
 
-    private fun fetchCampaignManga(campaignId: String): SManga {
-        return try {
-            client.newCall(GET(campaignApiUrl(campaignId), patreonHeaders())).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw Exception("HTTP ${response.code}")
-                }
-
-                val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
-                val campaign = root.dataResource(json)
-
-                campaign.toSManga(campaignId)
+    private fun fetchCampaignManga(campaignId: String): SManga = try {
+        client.newCall(GET(campaignApiUrl(campaignId), patreonHeaders())).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw Exception("HTTP ${response.code}")
             }
-        } catch (_: Exception) {
-            SManga.create().apply {
-                this.url = "/campaign/$campaignId"
-                title = "Patreon campaign $campaignId"
-                author = "Patreon"
-                artist = "Patreon"
-                description = ""
-                initialized = true
-            }
+
+            val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
+            val campaign = root.dataResource(json)
+
+            campaign.toSManga(campaignId)
+        }
+    } catch (_: Exception) {
+        SManga.create().apply {
+            this.url = "/campaign/$campaignId"
+            title = "Patreon campaign $campaignId"
+            author = "Patreon"
+            artist = "Patreon"
+            description = ""
+            initialized = true
         }
     }
 

@@ -292,10 +292,6 @@ fun PatreonApiRoot.searchResults(json: Json, baseUrl: String): List<SManga> {
     }.distinctBy { it.url }
 }
 
-/**
- * Builds an [SManga] for a campaign resource. [fallbackName] is only used when the API
- * didn't return a name for the campaign (e.g. a locally configured campaign ID).
- */
 fun PatreonResource.toSManga(campaignId: String, fallbackName: String = ""): SManga = SManga.create().apply {
     val username = attributes.pageUsername()
 

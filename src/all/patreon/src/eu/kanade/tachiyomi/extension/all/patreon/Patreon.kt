@@ -1,10 +1,8 @@
 package eu.kanade.tachiyomi.extension.all.patreon
 
 import android.app.Application
-import android.text.InputType
 import android.webkit.CookieManager
 import androidx.preference.CheckBoxPreference
-import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import eu.kanade.tachiyomi.network.GET
@@ -65,7 +63,7 @@ class Patreon :
             }
         }
 
-        MangasPage(listOf(resolveConfiguredCampaign()), false)
+        MangasPage(emptyList(), false)
     }
 
     override fun fetchLatestUpdates(page: Int): Observable<MangasPage> = fetchPopularManga(page)
@@ -233,27 +231,12 @@ class Patreon :
     )
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
-        EditTextPreference(screen.context).apply {
-            key = CAMPAIGN_ID_PREF
-            title = "Default campaign ID"
-            summary = "Optional fallback if Popular fails. First log in to Patreon using the app WebView for member-only posts."
-            setOnBindEditTextListener { editText ->
-                editText.inputType = InputType.TYPE_CLASS_NUMBER
-            }
-        }.let(screen::addPreference)
-
-        EditTextPreference(screen.context).apply {
-            key = CREATOR_NAME_PREF
-            title = "Default creator display name"
-            summary = "Optional fallback title before the campaign API is loaded."
-        }.let(screen::addPreference)
-
         ListPreference(screen.context).apply {
             key = POST_PAGES_PREF
             title = "Maximum post pages to load"
             summary = "Loading more pages costs more time and network traffic. Currently: %s"
-            entryValues = Array(POST_PAGES_MAX) { (it + 1).toString() }
-            entries = Array(POST_PAGES_MAX) { "${it + 1} pages" }
+            entryValues = POST_PAGE_OPTIONS
+            entries = POST_PAGE_OPTIONS.map { "$it pages" }.toTypedArray()
             setDefaultValue(POST_PAGES_DEFAULT)
         }.let(screen::addPreference)
 
@@ -393,22 +376,11 @@ class Patreon :
         }.build()
     }
 
-    private fun resolveConfiguredCampaign(): SManga {
-        val campaignId = preferences.getString(CAMPAIGN_ID_PREF, "")?.trim().orEmpty()
-
-        if (campaignId.isBlank()) {
-            throw Exception("Set a default campaign ID in extension settings, or search a Patreon creator URL.")
-        }
-
-        return fetchCampaignManga(campaignId)
-    }
-
     private fun resolveCampaignId(query: String): String {
         val trimmed = query.trim()
 
         if (trimmed.isBlank()) {
-            return preferences.getString(CAMPAIGN_ID_PREF, "")?.trim().takeUnless { it.isNullOrBlank() }
-                ?: throw Exception("Search with a Patreon creator URL, creator slug, or campaign ID.")
+            throw Exception("Search with a Patreon creator URL, creator slug, or campaign ID.")
         }
 
         if (trimmed.matches(Regex("""\d+"""))) {
@@ -442,8 +414,6 @@ class Patreon :
     }
 
     private fun fetchCampaignManga(campaignId: String): SManga {
-        val fallbackName = preferences.getString(CREATOR_NAME_PREF, "")?.trim().orEmpty()
-
         return try {
             client.newCall(GET(campaignApiUrl(campaignId), patreonHeaders())).execute().use { response ->
                 if (!response.isSuccessful) {
@@ -453,12 +423,12 @@ class Patreon :
                 val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
                 val campaign = root.dataResource(json)
 
-                campaign.toSManga(campaignId, fallbackName)
+                campaign.toSManga(campaignId)
             }
         } catch (_: Exception) {
             SManga.create().apply {
                 this.url = "/campaign/$campaignId"
-                title = fallbackName.ifBlank { "Patreon campaign $campaignId" }
+                title = "Patreon campaign $campaignId"
                 author = "Patreon"
                 artist = "Patreon"
                 description = ""
@@ -557,12 +527,12 @@ class Patreon :
     }
 
     companion object {
-        private const val CAMPAIGN_ID_PREF = "PATREON_CAMPAIGN_ID"
-        private const val CREATOR_NAME_PREF = "PATREON_CREATOR_NAME"
         private const val POST_PAGES_PREF = "PATREON_POST_PAGES"
         private const val HIDE_LOCKED_CHAPTERS_PREF = "PATREON_HIDE_LOCKED_CHAPTERS"
-        private const val POST_PAGES_DEFAULT = "1"
-        private const val POST_PAGES_MAX = 20
+        private const val POST_PAGES_DEFAULT = "5"
+
+        private val POST_PAGE_OPTIONS =
+            (5..75 step 5).map { it.toString() }.toTypedArray()
 
         private const val POST_PAGES_CACHE_SIZE = 200
         private const val SEARCH_CURSOR_CACHE_SIZE = 50

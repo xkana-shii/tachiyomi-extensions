@@ -34,20 +34,14 @@ data class PatreonLinks(
 )
 
 @Serializable
-data class PatreonPost(
-    val id: String,
-    val type: String? = null,
-    val attributes: PatreonAttributes = PatreonAttributes(),
-    val relationships: PatreonRelationships = PatreonRelationships(),
-)
-
-@Serializable
 data class PatreonResource(
     val id: String,
     val type: String? = null,
     val attributes: PatreonAttributes = PatreonAttributes(),
     val relationships: PatreonRelationships = PatreonRelationships(),
 )
+
+typealias PatreonPost = PatreonResource
 
 @Serializable
 data class PatreonResourceRef(
@@ -138,26 +132,28 @@ data class PatreonImageUrls(
     @SerialName("default_large") val defaultLarge: String? = null,
 )
 
-fun PatreonApiRoot.dataPosts(json: Json): List<PatreonPost> = when (data) {
-    is JsonArray -> data.mapNotNull { element ->
-        runCatching {
-            json.decodeFromJsonElement<PatreonPost>(element)
-        }.getOrNull()
-    }
-    is JsonObject -> listOfNotNull(
-        runCatching {
-            json.decodeFromJsonElement<PatreonPost>(data)
-        }.getOrNull(),
-    )
+private inline fun <reified T> JsonElement.decodeOrNull(json: Json): T? = runCatching { json.decodeFromJsonElement<T>(this) }.getOrNull()
+
+private inline fun <reified T> JsonElement.asList(json: Json): List<T> = when (this) {
+    is JsonArray -> mapNotNull { it.decodeOrNull<T>(json) }
+    is JsonObject -> listOfNotNull(decodeOrNull<T>(json))
     else -> emptyList()
 }
+
+fun PatreonApiRoot.dataPosts(json: Json): List<PatreonPost> = data.asList(json)
 
 fun PatreonApiRoot.dataResource(json: Json): PatreonResource = when (data) {
     is JsonObject -> json.decodeFromJsonElement(data)
     else -> throw Exception("Unexpected Patreon response")
 }
 
-fun PatreonApiRoot.currentUserMembershipResults(json: Json, baseUrl: String): List<SManga> {
+private fun JsonElement.asResourceList(json: Json): List<PatreonResource> = asList(json)
+
+private fun relationshipRefs(relationship: PatreonRelationship?, json: Json): List<PatreonResourceRef> = relationship?.data?.asList(json) ?: emptyList()
+
+private fun relationshipRef(relationship: PatreonRelationship?, json: Json): PatreonResourceRef? = (relationship?.data as? JsonObject)?.decodeOrNull(json)
+
+fun PatreonApiRoot.currentUserMembershipResults(json: Json): List<SManga> {
     val includedById = included.associateBy { it.id }
     val currentUser = data.asResourceList(json).firstOrNull() ?: return emptyList()
 
@@ -169,11 +165,11 @@ fun PatreonApiRoot.currentUserMembershipResults(json: Json, baseUrl: String): Li
             ?: campaign.id.takeIf { it.isNotBlank() }
             ?: return@mapNotNull null
 
-        campaign.toMembershipSManga(campaignId, baseUrl)
+        campaign.toSManga(campaignId)
     }.distinctBy { it.url }
 }
 
-fun PatreonApiRoot.exploreCampaignResults(json: Json, baseUrl: String): List<SManga> {
+fun PatreonApiRoot.exploreCampaignResults(json: Json): List<SManga> {
     val includedById = included.associateBy { it.id }
     val result = mutableListOf<SManga>()
 
@@ -185,7 +181,7 @@ fun PatreonApiRoot.exploreCampaignResults(json: Json, baseUrl: String): List<SMa
                 ?: campaign.id.takeIf { it.isNotBlank() }
                 ?: return@forEach
 
-            result.add(campaign.toExploreSManga(campaignId, baseUrl))
+            result.add(campaign.toSManga(campaignId))
         }
     }
 
@@ -196,14 +192,14 @@ fun PatreonApiRoot.exploreCampaignResults(json: Json, baseUrl: String): List<SMa
                 ?: campaign.id.takeIf { it.isNotBlank() }
                 ?: return@forEach
 
-            result.add(campaign.toExploreSManga(campaignId, baseUrl))
+            result.add(campaign.toSManga(campaignId))
         }
     }
 
     return result.distinctBy { it.url }
 }
 
-fun PatreonApiRoot.searchFeedCampaignResults(json: Json, baseUrl: String): List<SManga> {
+fun PatreonApiRoot.searchFeedCampaignResults(json: Json): List<SManga> {
     val includedById = included.associateBy { it.id }
 
     return data.asResourceList(json).mapNotNull { resource ->
@@ -212,7 +208,7 @@ fun PatreonApiRoot.searchFeedCampaignResults(json: Json, baseUrl: String): List<
             ?: campaign.id.takeIf { it.isNotBlank() }
             ?: return@mapNotNull null
 
-        campaign.toSearchSManga(campaignId, baseUrl)
+        campaign.toSManga(campaignId)
     }.distinctBy { it.url }
 }
 
@@ -296,10 +292,14 @@ fun PatreonApiRoot.searchResults(json: Json, baseUrl: String): List<SManga> {
     }.distinctBy { it.url }
 }
 
-fun PatreonResource.toSManga(campaignId: String, fallbackName: String): SManga = SManga.create().apply {
+/**
+ * Builds an [SManga] for a campaign resource. [fallbackName] is only used when the API
+ * didn't return a name for the campaign (e.g. a locally configured campaign ID).
+ */
+fun PatreonResource.toSManga(campaignId: String, fallbackName: String = ""): SManga = SManga.create().apply {
     val username = attributes.pageUsername()
 
-    this.url = "/campaign/$campaignId"
+    url = "/campaign/$campaignId"
     title = attributes.name ?: fallbackName.ifBlank { "Patreon campaign $campaignId" }
     author = username
     artist = username
@@ -312,12 +312,17 @@ fun PatreonResource.toSManga(campaignId: String, fallbackName: String): SManga =
     initialized = true
 }
 
-fun PatreonPost.toSChapter(campaignId: String): SChapter = SChapter.create().apply {
-    url = "/campaign/$campaignId/post/$id"
-    name = attributes.title?.takeIf { it.isNotBlank() } ?: "Post $id"
+fun PatreonPost.toSChapter(campaignId: String, locked: Boolean = false): SChapter = SChapter.create().apply {
+    url = "/campaign/$campaignId/post/$id" + if (locked) "?locked=true" else ""
+
+    val rawName = attributes.title?.takeIf { it.isNotBlank() } ?: "Post $id"
+    name = if (locked) "🔒 $rawName" else rawName
+
     date_upload = attributes.publishedAt.parsePatreonDate()
     chapter_number = -2f
 }
+
+fun PatreonPost.isLocked(): Boolean = attributes.currentUserCanView == false
 
 fun PatreonPost.imageUrls(root: PatreonApiRoot, json: Json): List<String> {
     if (attributes.currentUserCanView == false) return emptyList()
@@ -411,74 +416,6 @@ private fun PatreonResource.resolveCampaignFromSearchFeed(
     return null
 }
 
-private fun PatreonResource.toMembershipSManga(campaignId: String, baseUrl: String): SManga = toCampaignSearchSManga(campaignId, baseUrl)
-
-private fun PatreonResource.toExploreSManga(campaignId: String, baseUrl: String): SManga = toCampaignSearchSManga(campaignId, baseUrl)
-
-private fun PatreonResource.toSearchSManga(campaignId: String, baseUrl: String): SManga = toCampaignSearchSManga(campaignId, baseUrl)
-
-private fun PatreonResource.toCampaignSearchSManga(
-    campaignId: String,
-    baseUrl: String,
-): SManga = SManga.create().apply {
-    val username = attributes.pageUsername()
-
-    this.url = "/campaign/$campaignId"
-    title = attributes.name ?: "Patreon campaign $campaignId"
-    author = username
-    artist = username
-    thumbnail_url = attributes.avatarPhotoUrl
-        ?: attributes.avatarPhotoImageUrls.best()
-        ?: attributes.avatarUrl
-        ?: attributes.coverPhotoUrl
-        ?: attributes.coverUrl
-    description = attributes.summary.htmlToMarkdown().orEmpty()
-    initialized = true
-}
-
-private fun JsonElement.asResourceList(json: Json): List<PatreonResource> = when (this) {
-    is JsonArray -> mapNotNull { element ->
-        runCatching {
-            json.decodeFromJsonElement<PatreonResource>(element)
-        }.getOrNull()
-    }
-    is JsonObject -> listOfNotNull(
-        runCatching {
-            json.decodeFromJsonElement<PatreonResource>(this)
-        }.getOrNull(),
-    )
-    else -> emptyList()
-}
-
-private fun relationshipRefs(relationship: PatreonRelationship?, json: Json): List<PatreonResourceRef> {
-    val data = relationship?.data ?: return emptyList()
-
-    return when (data) {
-        is JsonArray -> data.mapNotNull { element ->
-            runCatching {
-                json.decodeFromJsonElement<PatreonResourceRef>(element)
-            }.getOrNull()
-        }
-        is JsonObject -> listOfNotNull(
-            runCatching {
-                json.decodeFromJsonElement<PatreonResourceRef>(data)
-            }.getOrNull(),
-        )
-        else -> emptyList()
-    }
-}
-
-private fun relationshipRef(relationship: PatreonRelationship?, json: Json): PatreonResourceRef? {
-    val data = relationship?.data ?: return null
-
-    return when (data) {
-        is JsonObject -> runCatching {
-            json.decodeFromJsonElement<PatreonResourceRef>(data)
-        }.getOrNull()
-        else -> null
-    }
-}
-
 private fun PatreonAttributes.bestImageUrl(): String? {
     val candidates = listOfNotNull(
         downloadUrl,
@@ -488,10 +425,9 @@ private fun PatreonAttributes.bestImageUrl(): String? {
         imageUrls?.defaultLarge,
         imageUrls?.thumbnail,
     )
+    val trustFirstCandidate = fileName.isImageFileName()
 
-    return candidates.firstOrNull { url ->
-        fileName.isImageFileName() || url.isImageUrl()
-    }
+    return candidates.firstOrNull { url -> trustFirstCandidate || url.isImageUrl() }
 }
 
 private fun PatreonAttributes.pageUsername(): String = vanity?.takeIf { it.isNotBlank() }
@@ -500,7 +436,7 @@ private fun PatreonAttributes.pageUsername(): String = vanity?.takeIf { it.isNot
     ?: name?.takeIf { it.isNotBlank() }
     ?: "Patreon"
 
-private fun String?.usernameFromPatreonUrl(): String? {
+internal fun String?.usernameFromPatreonUrl(): String? {
     if (isNullOrBlank()) return null
 
     return substringBefore("?")
@@ -516,11 +452,11 @@ private fun String?.htmlToMarkdown(): String? {
     val document = Jsoup.parseBodyFragment(this)
     val markdown = document.body().childNodes()
         .joinToString("") { node -> node.toMarkdown() }
+        .replace("\u00A0", " ")
 
     return markdown
-        .replace("\u00A0", " ")
-        .replace(Regex("[ \\t]+\\n"), "\n")
-        .replace(Regex("\\n[ \\t]+"), "\n")
+        .lineSequence()
+        .joinToString("\n") { line -> line.trim(' ', '\t') }
         .replace(Regex("\\n{3,}"), "\n\n")
         .trim()
         .takeIf { it.isNotBlank() }
@@ -636,16 +572,27 @@ private fun wrapMarkdown(marker: String, value: String): String {
     return "$marker$content$marker"
 }
 
-private fun String?.parsePatreonDate(): Long {
-    if (isNullOrBlank()) return 0L
+private object PatreonDateFormats {
+    private val patterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ssXXX",
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+    )
 
-    DATE_FORMATS.forEach { format ->
-        runCatching {
-            return format.parse(this)?.time ?: 0L
+    private val threadLocalFormats: ThreadLocal<List<SimpleDateFormat>> = object : ThreadLocal<List<SimpleDateFormat>>() {
+        override fun initialValue(): List<SimpleDateFormat> = patterns.map { pattern ->
+            SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
         }
     }
 
-    return 0L
+    fun parse(value: String): Long? = threadLocalFormats.get()
+        .firstNotNullOfOrNull { format -> runCatching { format.parse(value)?.time }.getOrNull() }
+}
+
+private fun String?.parsePatreonDate(): Long {
+    if (isNullOrBlank()) return 0L
+    return PatreonDateFormats.parse(this) ?: 0L
 }
 
 private fun String?.isImageFileName(): Boolean {
@@ -689,7 +636,7 @@ private fun JsonElement?.asString(): String? {
     return primitive.contentOrNull ?: primitive.intOrNull?.toString()
 }
 
-private fun String?.toSourcePath(baseUrl: String): String {
+internal fun String?.toSourcePath(baseUrl: String): String {
     val clean = this
         ?.substringBefore("?")
         ?.substringBefore("#")
@@ -716,14 +663,3 @@ private val IMAGE_URL_REGEX =
         """https?:\\?/\\?/[^\"'<>\s]+\.(?:jpg|jpeg|png|gif|webp|avif)(?:\?[^\"'<>\s]*)?""",
         RegexOption.IGNORE_CASE,
     )
-
-private val DATE_FORMATS = listOf(
-    "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
-    "yyyy-MM-dd'T'HH:mm:ssXXX",
-    "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
-    "yyyy-MM-dd'T'HH:mm:ss'Z'",
-).map { pattern ->
-    SimpleDateFormat(pattern, Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
-}

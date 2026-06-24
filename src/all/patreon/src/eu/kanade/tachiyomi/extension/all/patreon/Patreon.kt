@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.extension.all.patreon
 import android.app.Application
 import android.text.InputType
 import android.webkit.CookieManager
+import androidx.preference.CheckBoxPreference
 import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
@@ -24,6 +25,7 @@ import org.jsoup.Jsoup
 import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.IOException
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -42,8 +44,8 @@ class Patreon :
         isLenient = true
     }
 
-    private val postPagesCache = mutableMapOf<String, List<String>>()
-    private val searchCursorCache = mutableMapOf<String, MutableMap<Int, String?>>()
+    private val postPagesCache: MutableMap<String, List<String>> = LruCache(POST_PAGES_CACHE_SIZE)
+    private val searchCursorCache: MutableMap<String, MutableMap<Int, String?>> = LruCache(SEARCH_CURSOR_CACHE_SIZE)
 
     override fun headersBuilder(): Headers.Builder = super.headersBuilder()
         .set("User-Agent", USER_AGENT)
@@ -134,6 +136,7 @@ class Patreon :
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = Observable.fromCallable {
         val campaignId = manga.url.extractCampaignIdFromSourceUrl() ?: resolveCampaignId(manga.url)
         val maxPages = preferences.getString(POST_PAGES_PREF, POST_PAGES_DEFAULT)!!.toInt()
+        val requestHeaders = patreonHeaders()
 
         val chapters = mutableListOf<SChapter>()
         var nextUrl: String? = postsApiUrl(campaignId)
@@ -143,7 +146,7 @@ class Patreon :
             val requestUrl = nextUrl ?: break
             page++
 
-            client.newCall(GET(requestUrl, patreonHeaders())).execute().use { response ->
+            client.newCall(GET(requestUrl, requestHeaders)).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw Exception("Patreon HTTP ${response.code}. Check your login and that your account can view this creator.")
                 }
@@ -151,6 +154,13 @@ class Patreon :
                 val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
 
                 root.dataPosts(json).forEach { post ->
+                    if (post.isLocked()) {
+                        if (!hideLockedChapters()) {
+                            chapters.add(post.toSChapter(campaignId, locked = true))
+                        }
+                        return@forEach
+                    }
+
                     val imageUrls = post.imageUrls(root, json)
                     if (imageUrls.isNotEmpty()) {
                         postPagesCache[post.id] = imageUrls
@@ -169,12 +179,16 @@ class Patreon :
     override fun chapterListParse(response: Response): List<SChapter> = throw UnsupportedOperationException()
 
     override fun getChapterUrl(chapter: SChapter): String {
-        val postId = chapter.url.substringAfterLast("/post/").substringBefore('/')
+        val postId = chapter.url.extractPostIdFromChapterUrl()
         return "$baseUrl/posts/$postId"
     }
 
     override fun fetchPageList(chapter: SChapter): Observable<List<Page>> = Observable.fromCallable {
-        val postId = chapter.url.substringAfterLast("/post/").substringBefore('/')
+        val postId = chapter.url.extractPostIdFromChapterUrl()
+
+        if (chapter.url.isLockedChapterUrl()) {
+            throw IOException("This Patreon post is locked. You need a higher membership tier to read it.")
+        }
 
         postPagesCache[postId]?.let { cachedUrls ->
             return@fromCallable cachedUrls.toPages()
@@ -190,7 +204,7 @@ class Patreon :
     }
 
     override fun pageListRequest(chapter: SChapter): Request {
-        val postId = chapter.url.substringAfterLast("/post/").substringBefore('/')
+        val postId = chapter.url.extractPostIdFromChapterUrl()
         return GET(postApiUrl(postId), patreonHeaders())
     }
 
@@ -242,6 +256,13 @@ class Patreon :
             entries = Array(POST_PAGES_MAX) { "${it + 1} pages" }
             setDefaultValue(POST_PAGES_DEFAULT)
         }.let(screen::addPreference)
+
+        CheckBoxPreference(screen.context).apply {
+            key = HIDE_LOCKED_CHAPTERS_PREF
+            title = "Hide locked chapters"
+            summary = "Hide Patreon posts that your current membership cannot view. When disabled, locked posts appear with a 🔒 prefix."
+            setDefaultValue(false)
+        }.let(screen::addPreference)
     }
 
     private fun fetchCurrentUserMemberships(): MangasPage {
@@ -251,7 +272,7 @@ class Patreon :
             }
 
             val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
-            val mangas = root.currentUserMembershipResults(json, baseUrl)
+            val mangas = root.currentUserMembershipResults(json)
 
             return MangasPage(mangas, false)
         }
@@ -264,7 +285,7 @@ class Patreon :
             }
 
             val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
-            val mangas = root.exploreCampaignResults(json, baseUrl)
+            val mangas = root.exploreCampaignResults(json)
 
             return MangasPage(mangas, false)
         }
@@ -287,7 +308,7 @@ class Patreon :
             }
 
             val root = json.decodeFromString<PatreonApiRoot>(response.body.string())
-            val mangas = root.searchFeedCampaignResults(json, baseUrl)
+            val mangas = root.searchFeedCampaignResults(json)
             val next = root.links?.next
 
             saveNextSearchCursor(query, page, next)
@@ -339,7 +360,7 @@ class Patreon :
                     val username = href.usernameFromPatreonUrl() ?: title
 
                     SManga.create().apply {
-                        this.url = campaignId?.let { "/campaign/$it" } ?: href.toSourcePath()
+                        this.url = campaignId?.let { "/campaign/$it" } ?: href.toSourcePath(baseUrl)
                         this.title = title
                         author = username
                         artist = username
@@ -509,26 +530,7 @@ class Patreon :
         else -> "$baseUrl/$this"
     }
 
-    private fun String.toSourcePath(): String {
-        val clean = substringBefore("?").substringBefore("#")
-
-        return when {
-            clean.startsWith(baseUrl) -> clean.removePrefix(baseUrl).ifBlank { "/" }
-            clean.startsWith("/") -> clean
-            else -> "/$clean"
-        }
-    }
-
     private fun String.extractCampaignIdFromSourceUrl(): String? = Regex("""/campaign/(\d+)""").find(this)?.groupValues?.getOrNull(1)
-
-    private fun String.usernameFromPatreonUrl(): String? {
-        val clean = substringBefore("?")
-            .substringBefore("#")
-            .trimEnd('/')
-
-        return clean.substringAfterLast('/')
-            .takeIf { it.isNotBlank() && it != "www.patreon.com" && !it.contains("patreon.com") }
-    }
 
     private fun String.encode(): String = URLEncoder.encode(this, Charsets.UTF_8.name())
 
@@ -536,16 +538,34 @@ class Patreon :
 
     private fun String.searchCursorKey(): String = trim().lowercase()
 
+    private fun hideLockedChapters(): Boolean = preferences.getBoolean(HIDE_LOCKED_CHAPTERS_PREF, false)
+
+    private fun String.extractPostIdFromChapterUrl(): String = substringAfterLast("/post/")
+        .substringBefore('/')
+        .substringBefore('?')
+
+    private fun String.isLockedChapterUrl(): Boolean = substringAfter('?', "")
+        .split('&')
+        .any { it == "locked=true" }
+
     private fun FilterList.membershipsOnly(): Boolean = filterIsInstance<MembershipsOnlyFilter>().firstOrNull()?.state == true
 
     private class MembershipsOnlyFilter : Filter.CheckBox("Only memberships", false)
+
+    private class LruCache<K, V>(private val maxEntries: Int) : LinkedHashMap<K, V>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>): Boolean = size > maxEntries
+    }
 
     companion object {
         private const val CAMPAIGN_ID_PREF = "PATREON_CAMPAIGN_ID"
         private const val CREATOR_NAME_PREF = "PATREON_CREATOR_NAME"
         private const val POST_PAGES_PREF = "PATREON_POST_PAGES"
+        private const val HIDE_LOCKED_CHAPTERS_PREF = "PATREON_HIDE_LOCKED_CHAPTERS"
         private const val POST_PAGES_DEFAULT = "1"
         private const val POST_PAGES_MAX = 20
+
+        private const val POST_PAGES_CACHE_SIZE = 200
+        private const val SEARCH_CURSOR_CACHE_SIZE = 50
 
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
 

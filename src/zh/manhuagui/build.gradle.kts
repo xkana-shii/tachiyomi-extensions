@@ -9,6 +9,18 @@ keiyoushi {
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 3
+
+    deeplink {
+        host("manhuagui.com")
+        host("m.manhuagui.com")
+        host("www.manhuagui.com")
+        host("tw.manhuagui.com")
+        host("mhgui.com")
+        host("m.mhgui.com")
+        host("www.mhgui.com")
+        host("tw.mhgui.com")
+        path("/comic/..*")
+    }
 }
 
 dependencies {

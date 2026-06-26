@@ -9,6 +9,11 @@ keiyoushi {
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 3
+
+    deeplink {
+        host("3hentai.net")
+        path("/d/..*")
+    }
 }
 
 dependencies {

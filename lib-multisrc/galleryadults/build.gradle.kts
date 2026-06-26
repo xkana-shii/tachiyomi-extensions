@@ -6,4 +6,8 @@ keiyoushi {
     baseVersionCode = 9
     libVersion = "1.4"
     kmkBaseVersionCode = 1
+
+    deeplink {
+        path("/g.*/..*/")
+    }
 }

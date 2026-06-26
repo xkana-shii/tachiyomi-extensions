@@ -9,4 +9,10 @@ keiyoushi {
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 2
+
+    deeplink {
+        host("xinmeitulu.com")
+        host("*.xinmeitulu.com")
+        path("/photo/..*")
+    }
 }

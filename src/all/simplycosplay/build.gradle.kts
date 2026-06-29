@@ -4,11 +4,15 @@ plugins {
 
 keiyoushi {
     name = "Simply Cosplay"
-    className = "SimplyCosplay"
     versionCode = 4
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 1
+
+    source {
+        lang = "all"
+        baseUrl = "https://www.simply-cosplay.com"
+    }
 
     deeplink {
         host("www.simply-cosplay.com")

@@ -4,9 +4,13 @@ plugins {
 
 keiyoushi {
     name = "EveriaClub (unoriginal)"
-    className = "EveriaClubCom"
     versionCode = 1
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 1
+
+    source {
+        lang = "all"
+        baseUrl = "https://www.everiaclub.com"
+    }
 }

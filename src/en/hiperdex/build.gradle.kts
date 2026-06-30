@@ -4,13 +4,18 @@ plugins {
 
 keiyoushi {
     name = "Hiperdex"
-    className = "Hiperdex"
     versionCode = 29
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     theme = "madara"
-    baseUrl = "https://hiperdex.com"
     kmkVersionCode = 2
+
+    source {
+        lang = "en"
+        baseUrl("https://hiperdex.com") {
+            withCustom = true
+        }
+    }
 }
 
 dependencies {

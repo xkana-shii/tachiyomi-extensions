@@ -28,11 +28,7 @@ import org.jsoup.nodes.Element
  * - Support multiple tags filter
  * - Support video via WebView
  */
-abstract class Masonry(
-    override val name: String,
-    override val baseUrl: String,
-    override val lang: String,
-) : ParsedHttpSource() {
+abstract class Masonry : ParsedHttpSource() {
     protected open val useAlternativeLatestRequest = false
 
     override val supportsLatest = true

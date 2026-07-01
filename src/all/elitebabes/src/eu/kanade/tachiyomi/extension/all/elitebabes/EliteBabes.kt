@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.annotation.Source
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -25,7 +26,8 @@ import org.jsoup.nodes.Element
  * - Support Collections (/collections/)
  * - Support browse Boards (/boards/) & /search for Pins (/pins/)
  */
-class EliteBabes : Masonry("Elite Babes", "https://www.elitebabes.com", "all") {
+@Source
+abstract class EliteBabes : Masonry() {
     /**
      * External sites which ref link back to main site.
      * This is like highlight from Channels, without sorting

@@ -4,11 +4,17 @@ plugins {
 
 keiyoushi {
     name = "Kagane"
-    className = "KaganeFactory"
     versionCode = 26
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 1
+
+    listOf("en", "ja", "ko", "zh", "es", "es-419", "fr", "de", "pt", "pt-BR", "ru", "it", "id", "vi", "th", "pl", "hi", "ar").forEach {
+        source {
+            lang = it
+            baseUrl = "https://kagane.to"
+        }
+    }
 }
 
 dependencies {

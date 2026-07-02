@@ -4,7 +4,6 @@ plugins {
 
 keiyoushi {
     name = "3Hentai"
-    className = "Hentai3Factory"
     versionCode = 2
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
@@ -13,6 +12,19 @@ keiyoushi {
     deeplink {
         host("3hentai.net")
         path("/d/..*")
+    }
+
+    listOf(
+        "all", "en", "ja", "ko", "zh", "mo", "es", "pt", "id", "jv",
+        "tl", "vi", "th", "my", "tr", "ru", "uk", "pl", "fi", "de",
+        "it", "fr", "nl", "cs", "hu", "bg", "is", "la", "ar", "ceb",
+    ).forEach {
+        source {
+            lang = it
+            baseUrl = "https://3hentai.net"
+            // lang changed from po to pl, id kept from before the rename
+            if (it == "pl") id = 7940950215101782907L
+        }
     }
 }
 

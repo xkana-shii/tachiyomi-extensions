@@ -19,6 +19,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.source.online.ParsedHttpSource
 import eu.kanade.tachiyomi.util.asJsoup
+import keiyoushi.annotation.Source
 import keiyoushi.lib.randomua.addRandomUAPreference
 import keiyoushi.lib.randomua.setRandomUserAgent
 import keiyoushi.utils.getPreferencesLazy
@@ -30,16 +31,62 @@ import okhttp3.Response
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
-open class Hentai3(
-    override val lang: String = "all",
-    private val searchLang: String = "",
-    private val flagLang: String = "",
-) : ParsedHttpSource(),
+@Source
+abstract class Hentai3 :
+    ParsedHttpSource(),
     ConfigurableSource {
 
-    override val name = "3Hentai"
+    private val searchLang: String
+        get() = when (lang) {
+            "all" -> ""
+            "en" -> "english"
+            "ja" -> "japanese"
+            "ko" -> "korean"
+            "zh" -> "chinese"
+            "mo" -> "mongolian"
+            "es" -> "spanish"
+            "pt" -> "Portuguese"
+            "id" -> "indonesian"
+            "jv" -> "javanese"
+            "tl" -> "tagalog"
+            "vi" -> "vietnamese"
+            "th" -> "thai"
+            "my" -> "burmese"
+            "tr" -> "turkish"
+            "ru" -> "russian"
+            "uk" -> "ukrainian"
+            "pl" -> "polish"
+            "fi" -> "finnish"
+            "de" -> "german"
+            "it" -> "italian"
+            "fr" -> "french"
+            "nl" -> "dutch"
+            "cs" -> "czech"
+            "hu" -> "hungarian"
+            "bg" -> "bulgarian"
+            "is" -> "icelandic"
+            "la" -> "latin"
+            "ar" -> "arabic"
+            else -> ""
+        }
 
-    override val baseUrl = "https://3hentai.net"
+    private val flagLang: String
+        get() = when (lang) {
+            "all" -> ""
+            "en" -> "en"
+            "ja" -> "jpn"
+            "ko" -> "kor"
+            "zh" -> "zho"
+            "es" -> "spa"
+            "pt" -> "por"
+            "vi" -> "vie"
+            "th" -> "tha"
+            "ru" -> "rus"
+            "it" -> "ita"
+            "fr" -> "fra"
+            "ar" -> "ara"
+            else -> ""
+        }
 
     override val supportsLatest = true
 

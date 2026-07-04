@@ -4,11 +4,22 @@ plugins {
 
 keiyoushi {
     name = "ManHuaGui"
-    className = "Manhuagui"
     versionCode = 28
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
     kmkVersionCode = 3
+
+    source {
+        name = "漫画柜"
+        lang = "zh"
+        baseUrl("https://www.manhuagui.com") {
+            mirrors = listOf(
+                "https://tw.manhuagui.com",
+                "https://www.mhgui.com",
+                "https://tw.mhgui.com",
+            )
+        }
+    }
 
     deeplink {
         host("manhuagui.com")

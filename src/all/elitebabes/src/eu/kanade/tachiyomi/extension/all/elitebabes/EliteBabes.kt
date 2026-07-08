@@ -13,6 +13,7 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
+import keiyoushi.utils.firstInstanceOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
@@ -84,54 +85,74 @@ abstract class EliteBabes : Masonry() {
 
     class ChannelFilter(channels: List<Pair<String, String>>) : SelectFilter("Channels", channels)
 
+    @Volatile
     private var channelsFetchAttempt = 0
+
+    @Volatile
+    private var channelsFetching = false
+
+    @Volatile
     private var channels = emptyList<Pair<String, String>>()
 
+    @Synchronized
     private fun getChannels() {
+        if (channels.isNotEmpty() || channelsFetching || channelsFetchAttempt >= 3) return
+        channelsFetching = true
+        channelsFetchAttempt++
         launchIO {
-            if (channels.isEmpty() && channelsFetchAttempt < 3) {
-                runCatching {
-                    channels = listOf(Pair("Off", "")) +
-                        client.newCall(GET("$baseUrl/erotic-art-channels/", headers))
-                            .execute().asJsoup()
-                            .select("ul.list-gallery figure > a")
-                            .mapNotNull {
-                                Pair(
-                                    it.select("img").attr("alt"),
-                                    it.attr("href")
-                                        .removeSuffix("/")
-                                        .substringAfterLast("/"),
-                                )
-                            }
-                }
-                channelsFetchAttempt++
+            try {
+                channels = listOf(Pair("Off", "")) +
+                    client.newCall(GET("$baseUrl/erotic-art-channels/", headers)).execute()
+                        .use { it.asJsoup() }
+                        .select("ul.list-gallery figure > a")
+                        .map {
+                            Pair(
+                                it.select("img").attr("alt"),
+                                it.attr("href")
+                                    .removeSuffix("/")
+                                    .substringAfterLast("/"),
+                            )
+                        }
+            } catch (_: Exception) {
+            } finally {
+                channelsFetching = false
             }
         }
     }
 
     class BoardFilter(boards: List<Pair<String, String>>) : SelectFilter("Boards", boards)
 
+    @Volatile
     private var boardsFetchAttempt = 0
+
+    @Volatile
+    private var boardsFetching = false
+
+    @Volatile
     private var boards = emptyList<Pair<String, String>>()
 
+    @Synchronized
     private fun getBoards() {
+        if (boards.isNotEmpty() || boardsFetching || boardsFetchAttempt >= 3) return
+        boardsFetching = true
+        boardsFetchAttempt++
         launchIO {
-            if (boards.isEmpty() && boardsFetchAttempt < 3) {
-                runCatching {
-                    boards = listOf(Pair("Off", "")) +
-                        client.newCall(GET("$baseUrl/boards/", headers))
-                            .execute().asJsoup()
-                            .select("ul.list-gallery figure > a")
-                            .mapNotNull {
-                                Pair(
-                                    it.select("img").attr("alt"),
-                                    it.attr("href")
-                                        .removeSuffix("/")
-                                        .substringAfterLast("/"),
-                                )
-                            }
-                }
-                boardsFetchAttempt++
+            try {
+                boards = listOf(Pair("Off", "")) +
+                    client.newCall(GET("$baseUrl/boards/", headers)).execute()
+                        .use { it.asJsoup() }
+                        .select("ul.list-gallery figure > a")
+                        .map {
+                            Pair(
+                                it.select("img").attr("alt"),
+                                it.attr("href")
+                                    .removeSuffix("/")
+                                    .substringAfterLast("/"),
+                            )
+                        }
+            } catch (_: Exception) {
+            } finally {
+                boardsFetching = false
             }
         }
     }
@@ -165,10 +186,10 @@ abstract class EliteBabes : Masonry() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        val highlightsFilter = filters.filterIsInstance<HighlightsFilter>().first()
-        val channelFilter = filters.filterIsInstance<ChannelFilter>().first()
-        val boardFilter = filters.filterIsInstance<BoardFilter>().first()
-        val sortFilter = filters.filterIsInstance<SortFilter>().first()
+        val highlightsFilter = filters.firstInstanceOrNull<HighlightsFilter>() ?: HighlightsFilter(highlights)
+        val channelFilter = filters.firstInstanceOrNull<ChannelFilter>() ?: ChannelFilter(channels)
+        val boardFilter = filters.firstInstanceOrNull<BoardFilter>() ?: BoardFilter(boards)
+        val sortFilter = filters.firstInstanceOrNull<SortFilter>() ?: SortFilter()
 
         return when {
             highlightsFilter.state != 0 -> GET(highlightsFilter.selected, headers)
@@ -230,9 +251,11 @@ abstract class EliteBabes : Masonry() {
     )
 
     override fun searchMangaParse(response: Response): MangasPage {
+        getChannels()
+        getBoards()
         val requestUrl = response.request.url.toString()
         return when {
-            highlights.map { it.second }.any { it == requestUrl } -> {
+            highlights.any { it.second == requestUrl } -> {
                 /* Handle filter for highlights */
                 MangasPage(
                     mangas = response.asJsoup().select("div.item a[href]:has(img)")
@@ -244,10 +267,8 @@ abstract class EliteBabes : Masonry() {
                 val mangaFromElement = ::collectionMangaFromElement
 
                 val document = response.asJsoup()
-                val mangas = document.select(searchMangaSelector())
-                    .map { element -> mangaFromElement(element) }
-                val hasNextPage = searchMangaNextPageSelector().let { document.select(it).first() } != null
-
+                val mangas = document.select(popularMangaSelector()).map(mangaFromElement)
+                val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
                 MangasPage(mangas, hasNextPage)
             }
             /* Support all three:
@@ -262,8 +283,7 @@ abstract class EliteBabes : Masonry() {
                 val mangas =
                     document.select("$galleryListSelector > li:not(:has(.icon-play, a[href*='/video/']))")
                         .map { element -> mangaFromElement(element) }
-                val hasNextPage = searchMangaNextPageSelector().let { document.select(it).first() } != null
-
+                val hasNextPage = document.selectFirst(popularMangaNextPageSelector()) != null
                 MangasPage(mangas, hasNextPage)
             }
             else -> super.searchMangaParse(response)

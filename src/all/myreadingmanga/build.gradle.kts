@@ -4,11 +4,11 @@ plugins {
 
 keiyoushi {
     name = "MyReadingManga"
-    versionCode = 61
+    versionCode = 62
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
 
-    listOf("ar", "id", "zh", "en", "de", "it", "ja", "ko", "pt-BR", "ru", "es", "tr", "vi").forEach {
+    listOf("ar", "id", "zh", "zh_tw", "hr", "en", "fil", "fr", "de", "hu", "it", "ja", "ko", "lt", "fa", "pl", "pt-BR", "ru", "sk", "es", "sv", "th", "tr", "vi").forEach {
         source {
             lang = it
             baseUrl = "https://myreadingmanga.info"

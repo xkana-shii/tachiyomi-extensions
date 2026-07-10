@@ -1,11 +1,13 @@
 package eu.kanade.tachiyomi.multisrc.kemono
 
 import android.app.Application
+import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.multisrc.kemono.KemonoCreatorDto.Companion.serviceName
 import eu.kanade.tachiyomi.network.GET
+import eu.kanade.tachiyomi.network.POST
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -17,9 +19,13 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.network.rateLimit
 import keiyoushi.utils.getPreferences
 import keiyoushi.utils.parseAs
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.CacheControl
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.brotli.BrotliInterceptor
 import rx.Observable
@@ -130,6 +136,9 @@ abstract class Kemono :
 
         val mangas = run {
             val favorites = if (fav != null) {
+                // KNS
+                autoLoginIfNeeded()
+                // KNS
                 val response = client.newCall(GET("$baseUrl/$apiPath/account/favorites", headers)).execute()
 
                 if (response.isSuccessful) {
@@ -308,7 +317,44 @@ abstract class Kemono :
             summary = "Reduce load time significantly. When turning off, clear chapter cache to remove cached low resolution images."
             setDefaultValue(false)
         }.let(screen::addPreference)
+
+        // KNS
+        EditTextPreference(screen.context).apply {
+            key = LOGIN_USERNAME_PREF
+            title = "Kemono username"
+            summary = "Used for automatic login when favorites are requested."
+            setDefaultValue("")
+        }.let(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = LOGIN_PASSWORD_PREF
+            title = "Kemono password"
+            summary = "Used for automatic login when favorites are requested."
+            setDefaultValue("")
+        }.let(screen::addPreference)
+        // KNS
     }
+
+    // KNS
+    private fun autoLoginIfNeeded() {
+        val username = preferences.getString(LOGIN_USERNAME_PREF, "").orEmpty()
+        val password = preferences.getString(LOGIN_PASSWORD_PREF, "").orEmpty()
+        if (username.isBlank() || password.isBlank()) return
+
+        val body = Json.encodeToString(
+            KemonoLoginRequestDto(username = username, password = password),
+        ).toRequestBody("application/json".toMediaType())
+
+        val request = POST(
+            "$baseUrl/v1/authentication/login",
+            headers.newBuilder().add("Accept", "application/json").build(),
+            body,
+        )
+
+        val response = client.newCall(request).execute()
+        response.close()
+    }
+    // KNS
 
     // Filters
 
@@ -362,5 +408,10 @@ abstract class Kemono :
 
         // private const val BASE_URL_PREF = "BASE_URL"
         private const val USE_LOW_RES_IMG = "USE_LOW_RES_IMG"
+
+        // KNS
+        private const val LOGIN_USERNAME_PREF = "LOGIN_USERNAME"
+        private const val LOGIN_PASSWORD_PREF = "LOGIN_PASSWORD"
+        // KNS
     }
 }

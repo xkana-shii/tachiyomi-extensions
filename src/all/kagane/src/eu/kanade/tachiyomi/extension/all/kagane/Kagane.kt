@@ -262,7 +262,7 @@ abstract class Kagane :
     override fun searchMangaParse(response: Response): MangasPage {
         val dto = response.parseAs<SearchDto>()
         val sources = getSourcesMap()
-        val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources) }
+        val mangas = dto.content.map { it.toSManga(apiUrl, preferences.showSource, sources, preferences.removeTitleExtras) }
         return MangasPage(mangas, hasNextPage = dto.hasNextPage())
     }
 
@@ -324,7 +324,7 @@ abstract class Kagane :
                     null
                 }
         }
-        return dto.toSManga(apiUrl, sourceName, baseUrl, preferences.showEdition, preferences.showSource)
+        return dto.toSManga(apiUrl, sourceName, baseUrl, preferences.showEdition, preferences.showSource, preferences.removeTitleExtras)
     }
 
     override fun mangaDetailsRequest(manga: SManga): Request = mangaDetailsRequest(manga.url)
@@ -466,6 +466,11 @@ abstract class Kagane :
     private val SharedPreferences.chapterTitleMode
         get() = this.getString(CHAPTER_TITLE_MODE, CHAPTER_TITLE_MODE_DEFAULT)!!
 
+    // KNS
+    private val SharedPreferences.removeTitleExtras: Boolean
+        get() = this.getBoolean(REMOVE_TITLE_EXTRAS, false)
+    // KNS
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         ListPreference(screen.context).apply {
             key = CONTENT_RATING
@@ -521,6 +526,15 @@ abstract class Kagane :
             setDefaultValue(false)
         }.let(screen::addPreference)
 
+        // KNS
+        SwitchPreferenceCompat(screen.context).apply {
+            key = REMOVE_TITLE_EXTRAS
+            title = "Remove extra tags from titles"
+            summary = "Remove bracketed or parenthetical tags (e.g. [mature], (full ver.)) from manga titles"
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+        // KNS
+
         ListPreference(screen.context).apply {
             key = CHAPTER_TITLE_MODE
             title = "Chapter title format"
@@ -556,17 +570,23 @@ abstract class Kagane :
 
         private const val DATA_SAVER = "data_saver_default"
 
+        // KNS
+        private const val REMOVE_TITLE_EXTRAS = "pref_remove_title_extras"
+        // KNS
+
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
-        private const val CHAPTER_TITLE_MODE_DEFAULT = "optional"
+        private const val CHAPTER_TITLE_MODE_DEFAULT = "smart_vol_chapter"
         internal val CHAPTER_TITLE_MODES = arrayOf(
-            "optional",
+            "smart_vol_chapter",
             "always",
             "vol_chapter",
+            "smart",
         )
         internal val CHAPTER_TITLE_MODE_NAMES = arrayOf(
-            "Title only (e.g. 'Manga Title' / 'Ch.5')",
+            "Smart Vol.X Ch.Y + title",
             "Ch.X + title (e.g. 'Ch.5 Manga Title')",
             "Vol.X Ch.Y + title (e.g. 'Vol.1 Ch.5 Manga Title')",
+            "Smart",
         )
     }
 

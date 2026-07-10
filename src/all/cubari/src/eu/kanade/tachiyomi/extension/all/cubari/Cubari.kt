@@ -20,8 +20,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.annotation.Source
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -239,30 +237,6 @@ abstract class Cubari : HttpSource(), ConfigurableSource {
             Base64.URL_SAFE or Base64.NO_WRAP,
         )
         return "$CUBARI_PROXY_PREFIX$encodedUrl"
-    }
-
-    override suspend fun getImage(page: Page): Response = withContext(Dispatchers.IO) {
-        val imageUrl = page.imageUrl ?: throw IllegalArgumentException("imageUrl is null")
-        if (!imageUrl.startsWith(CUBARI_PROXY_PREFIX)) {
-            return@withContext network.client.newCall(
-                Request.Builder().url(imageUrl).get().build(),
-            ).execute()
-        }
-
-        val originalUrl = runCatching {
-            String(
-                Base64.decode(
-                    imageUrl.removePrefix(CUBARI_PROXY_PREFIX),
-                    Base64.URL_SAFE or Base64.NO_WRAP,
-                ),
-            )
-        }.getOrElse { throw IllegalArgumentException("Invalid proxy URL", it) }
-
-        runCatching {
-            client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
-        }.getOrNull()
-            ?.takeIf { it.isSuccessful }
-            ?: network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
     }
     // KNS
 

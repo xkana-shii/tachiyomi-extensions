@@ -1,11 +1,16 @@
 package eu.kanade.tachiyomi.extension.all.cubari
 
 import android.os.Build
+import android.text.InputType
 import android.util.Base64
+import androidx.preference.EditTextPreference
+import androidx.preference.PreferenceScreen
+import androidx.preference.SwitchPreferenceCompat
 import eu.kanade.tachiyomi.AppInfo
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.asObservable
 import eu.kanade.tachiyomi.network.asObservableSuccess
+import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -13,7 +18,10 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.annotation.Source
+import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
@@ -24,18 +32,29 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Request
 import okhttp3.Response
+import org.json.JSONObject
 import rx.Observable
 
 @Source
-abstract class Cubari : HttpSource() {
+abstract class Cubari : HttpSource(), ConfigurableSource {
+
+    private val preferences by getPreferencesLazy()
 
     override val supportsLatest = true
 
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
             val request = chain.request()
+            val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
             val headers = request.headers.newBuilder()
                 .removeAll("Accept-Encoding")
+                .apply {
+                    // KNS
+                    if (token.isNotBlank() && isGithubHost(request.url.host)) {
+                        set("Authorization", "token $token")
+                    }
+                    // KNS
+                }
                 .build()
             chain.proceed(request.newBuilder().headers(headers).build())
         }
@@ -152,8 +171,10 @@ abstract class Cubari : HttpSource() {
             } else {
                 jsonEl.jsonPrimitive.content
             }
-
-            Page(i, "", page)
+            // KNS
+            val finalUrl = proxyUrlIfGithubHost(page)
+            Page(i, "", finalUrl)
+            // KNS
         }
     }
 
@@ -186,12 +207,46 @@ abstract class Cubari : HttpSource() {
             } else {
                 jsonEl.jsonPrimitive.content
             }
-
-            Page(i, "", page)
+            // KNS
+            val finalUrl = proxyUrlIfGithubHost(page)
+            Page(i, "", finalUrl)
+            // KNS
         }
     }
 
     override fun pageListParse(response: Response): List<Page> = throw UnsupportedOperationException()
+
+    // KNS
+    override suspend fun getImage(page: Page): Response = withContext(Dispatchers.IO) {
+        val imageUrl = page.imageUrl ?: throw IllegalArgumentException("imageUrl is null")
+
+        if (!imageUrl.startsWith("cubari://proxy/")) {
+            return@withContext network.client.newCall(Request.Builder().url(imageUrl).get().build()).execute()
+        }
+
+        val originalUrl = runCatching {
+            String(Base64.decode(imageUrl.removePrefix("cubari://proxy/"), Base64.URL_SAFE or Base64.NO_WRAP))
+        }.getOrElse { throw IllegalArgumentException("Invalid proxy URL") }
+
+        runCatching { client.newCall(Request.Builder().url(originalUrl).get().build()).execute() }
+            .getOrNull()
+            ?.takeIf { it.isSuccessful }
+            ?: network.client.newCall(Request.Builder().url(originalUrl).get().build()).execute()
+    }
+
+    private fun isGithubHost(host: String): Boolean {
+        val h = host.lowercase()
+        return h == "github.com" || h.endsWith(".github.com") || h.endsWith(".githubusercontent.com")
+    }
+
+    private fun proxyUrlIfGithubHost(url: String): String {
+        if (url.isBlank()) return url
+        val host = runCatching { url.toHttpUrl().host }.getOrNull() ?: return url
+        if (!isGithubHost(host)) return url
+        val encoded = Base64.encodeToString(url.toByteArray(), Base64.URL_SAFE or Base64.NO_WRAP)
+        return "cubari://proxy/$encoded"
+    }
+    // KNS
 
     override fun fetchSearchManga(page: Int, query: String, filters: FilterList): Observable<MangasPage> = when {
         // handle direct links or old cubari:source/id format
@@ -214,6 +269,16 @@ abstract class Cubari : HttpSource() {
                 }
         }
 
+        // KNS
+        query.startsWith("github:") -> {
+            Observable.fromCallable {
+                val mangasPage = githubRepoMangaList(query.removePrefix("github:").trim())
+                require(mangasPage.mangas.isNotEmpty()) { "No .json files found in the specified GitHub repository." }
+                mangasPage
+            }
+        }
+        // KNS
+
         else -> {
             client.newBuilder()
                 .addInterceptor(RemoteStorageUtils.HomeInterceptor())
@@ -231,6 +296,89 @@ abstract class Cubari : HttpSource() {
     }
 
     override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request = GET("$baseUrl/", cubariHeaders)
+
+    // KNS
+    private fun languageCodeAlias(raw: String): String? = mapOf(
+        "en" to "en", "english" to "en",
+        "ja" to "ja", "jp" to "ja", "japanese" to "ja",
+        "ko" to "ko", "kr" to "ko", "korean" to "ko",
+        "zh" to "zh", "chinese" to "zh", "zh-cn" to "zh", "zh-hans" to "zh", "zh-hant" to "zh",
+    )[raw.lowercase()]
+
+    private fun extractSupportedLang(description: String?): String? {
+        if (description == null) return null
+        val lower = description.lowercase()
+
+        val lineRegex = Regex("""^\s*lang(?:uage)?[\s:]+([a-z0-9\-_]+)\s*$""", RegexOption.MULTILINE)
+        lineRegex.find(lower)?.groupValues?.get(1)?.let { languageCodeAlias(it)?.let { c -> return c } }
+
+        Regex("""lang:\s*([a-z0-9\-_]+)""").find(lower)?.groupValues?.get(1)
+            ?.let { languageCodeAlias(it)?.let { c -> return c } }
+
+        return listOf("english" to "en", "japanese" to "ja", "korean" to "ko", "chinese" to "zh")
+            .firstOrNull { (name, _) -> lower.contains(name) }?.second
+            ?: if (lower.contains("zh-cn") || lower.contains("zh-hans") || lower.contains("zh-hant")) "zh" else null
+    }
+
+    private fun githubRepoMangaList(repo: String): MangasPage {
+        val branch = "master"
+        val token = preferences.getString(PREF_GITHUB_TOKEN, "") ?: ""
+
+        fun Request.Builder.withToken() = apply { if (token.isNotEmpty()) header("Authorization", "token $token") }
+
+        val treeResp = client.newCall(
+            Request.Builder()
+                .url("https://api.github.com/repos/$repo/git/trees/$branch?recursive=1")
+                .header("Accept", "application/vnd.github+json")
+                .withToken().build(),
+        ).execute()
+
+        val jsonFiles: List<String> = if (treeResp.isSuccessful) {
+            val tree = JSONObject(treeResp.body?.string() ?: "").getJSONArray("tree")
+            (0 until tree.length())
+                .map { tree.getJSONObject(it) }
+                .filter { it.getString("type") == "blob" && it.getString("path").endsWith(".json") }
+                .map { it.getString("path") }
+        } else {
+            emptyList()
+        }
+
+        val requiredKeys = listOf("title", "description", "artist", "author")
+        val enforceLang = preferences.getBoolean(PREF_ENFORCE_LANGUAGE, true)
+        val sourceLang = lang.lowercase()
+        val showAllLangs = sourceLang == "all" || sourceLang == "other"
+        val sourceCode = if (!showAllLangs && enforceLang) languageCodeAlias(sourceLang) else null
+
+        val validMangaList = jsonFiles.mapNotNull { path ->
+            val rawUrl = "https://raw.githubusercontent.com/$repo/$branch/$path"
+            runCatching {
+                val resp = client.newCall(Request.Builder().url(rawUrl).withToken().build()).execute()
+                if (!resp.isSuccessful) return@mapNotNull null
+                val json = JSONObject(resp.body?.string() ?: return@mapNotNull null)
+                if (!requiredKeys.all { json.has(it) }) return@mapNotNull null
+
+                val descField = json.optString("description", "")
+                if (sourceCode != null && extractSupportedLang(descField) != sourceCode) return@mapNotNull null
+
+                val displayTitle = json.optString("title").takeIf { it.isNotBlank() }
+                    ?: path.substringAfterLast("/").removeSuffix(".json")
+                val gistBase64 = Base64.encodeToString(
+                    "raw/$repo/$branch/$path".toByteArray(),
+                    Base64.NO_PADDING or Base64.NO_WRAP,
+                )
+
+                SManga.create().apply {
+                    title = displayTitle
+                    url = "/read/gist/$gistBase64"
+                    description = "GitHub: $repo\nPath: $path" + if (descField.isNotBlank()) "\n\n$descField" else ""
+                    thumbnail_url = json.optString("cover", "")
+                }
+            }.getOrNull()
+        }
+
+        return MangasPage(validMangaList, false)
+    }
+    // KNS
 
     private fun deepLinkHandler(query: String): Pair<String, String> = if (query.startsWith("cubari:")) { // legacy cubari:source/slug format
         val queryFragments = query.substringAfter("cubari:").split("/", limit = 2)
@@ -369,7 +517,8 @@ abstract class Cubari : HttpSource() {
         author = jsonObj["author"]?.jsonPrimitive?.content ?: AUTHOR_FALLBACK
 
         val descriptionFull = jsonObj["description"]?.jsonPrimitive?.content
-        description = descriptionFull?.substringBefore("Tags: ") ?: DESCRIPTION_FALLBACK
+        // KNS
+        description = descriptionFull?.substringBefore("Status: ")?.trim() ?: DESCRIPTION_FALLBACK
         genre = descriptionFull?.let {
             if (it.contains("Tags: ")) {
                 it.substringAfter("Tags: ")
@@ -377,6 +526,16 @@ abstract class Cubari : HttpSource() {
                 ""
             }
         } ?: ""
+        status = when {
+            descriptionFull?.contains("Status: Completed", ignoreCase = true) == true -> SManga.COMPLETED
+            descriptionFull?.contains("Status: Ongoing", ignoreCase = true) == true -> SManga.ONGOING
+            descriptionFull?.contains("Status: Licensed", ignoreCase = true) == true -> SManga.LICENSED
+            descriptionFull?.contains("Status: Publishing Finished", ignoreCase = true) == true -> SManga.PUBLISHING_FINISHED
+            descriptionFull?.contains("Status: Cancelled", ignoreCase = true) == true -> SManga.CANCELLED
+            descriptionFull?.contains("Status: On Hiatus", ignoreCase = true) == true -> SManga.ON_HIATUS
+            else -> SManga.UNKNOWN
+        }
+        // KNS
 
         url = mangaReference?.url ?: jsonObj["url"]!!.jsonPrimitive.content
         thumbnail_url = jsonObj["coverUrl"]?.jsonPrimitive?.content
@@ -387,11 +546,36 @@ abstract class Cubari : HttpSource() {
 
     override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
+    // KNS
+    override fun setupPreferenceScreen(screen: PreferenceScreen) {
+        EditTextPreference(screen.context).apply {
+            key = PREF_GITHUB_TOKEN
+            title = "GitHub Personal Access Token"
+            summary = "Use to increase GitHub API rate limit for repository searches and authenticated fetches."
+            setDefaultValue("")
+            setOnBindEditTextListener { editText ->
+                editText.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = PREF_ENFORCE_LANGUAGE
+            title = "Enforce Language"
+            summary = "When enabled, only manga matching the selected language will be shown for repository searches. Disable to show all."
+            setDefaultValue(true)
+        }.let(screen::addPreference)
+    }
+    // KNS
+
     companion object {
         const val AUTHOR_FALLBACK = "Unknown"
         const val ARTIST_FALLBACK = "Unknown"
         const val DESCRIPTION_FALLBACK = "No description."
         const val SEARCH_FALLBACK_MSG = "Please enter a valid Cubari URL"
+        // KNS
+        private const val PREF_GITHUB_TOKEN = "cubari_github_token"
+        private const val PREF_ENFORCE_LANGUAGE = "cubari_enforce_language"
+        // KNS
 
         enum class SortType {
             PINNED,

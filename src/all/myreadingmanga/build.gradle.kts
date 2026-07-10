@@ -8,7 +8,7 @@ keiyoushi {
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
 
-    listOf("ar", "id", "zh", "zh_tw", "hr", "en", "fil", "fr", "de", "hu", "it", "ja", "ko", "lt", "fa", "pl", "pt-BR", "ru", "sk", "es", "sv", "th", "tr", "vi").forEach {
+    listOf("ar", "id", "zh", "zh-hant", "hr", "en", "fil", "fr", "de", "hu", "it", "ja", "ko", "lt", "fa", "pl", "pt", "pt-BR", "ru", "sk", "es", "sv", "th", "tr", "vi").forEach {
         source {
             lang = it
             baseUrl = "https://myreadingmanga.info"

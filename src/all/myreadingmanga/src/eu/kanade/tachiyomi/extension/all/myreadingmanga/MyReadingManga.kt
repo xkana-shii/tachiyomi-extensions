@@ -35,6 +35,7 @@ import org.jsoup.nodes.Element
 import rx.Observable
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -48,7 +49,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             "ar" -> "Arabic"
             "id" -> "Indonesia"
             "zh" -> "Chinese"
-            "zh_tw" -> "Chinese (Traditional)"
+            "zh-hant" -> "Traditional-Chinese"
             "hr" -> "Croatian"
             "en" -> "English"
             "fil" -> "Filipino"
@@ -62,6 +63,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             "fa" -> "Persian"
             "pl" -> "Polish"
             "pt-BR" -> "Portuguese"
+            "pt" -> "Portuguese"
             "ru" -> "Russian"
             "sk" -> "Slovak"
             "es" -> "Spanish"
@@ -79,7 +81,6 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
         .set("User-Agent", USER_AGENT)
         .add("X-Requested-With", randomString((1..20).random()))
 
-    // KNS
     private val preferences: SharedPreferences = Injekt.get<Application>().getSharedPreferences("source_$id", 0x0000)
     private val credentials: Credential
         get() = Credential(
@@ -87,11 +88,6 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             password = preferences.getString(PASSWORD_PREF, "") ?: "",
         )
     private data class Credential(val username: String, val password: String)
-
-    @Volatile
-    private var isLoggedIn = false
-    private val loginLock = Any()
-    // KNS
 
     override val client = network.client.newBuilder()
         .addInterceptor { chain ->
@@ -103,59 +99,60 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             chain.proceed(request.newBuilder().headers(headers).build())
         }
         // KNS
-        .addInterceptor(::loginInterceptor)
+        .addInterceptor(LoginInterceptor())
         // KNS
         .build()
 
     override val supportsLatest = true
 
     // KNS
-    // Login Interceptor
-    private fun loginInterceptor(chain: Interceptor.Chain): Response {
-        val request = chain.request()
+    private inner class LoginInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val request = chain.request()
+            val path = request.url.encodedPath
 
-        if (credentials.username.isBlank() || credentials.password.isBlank()) {
-            return chain.proceed(request)
-        }
-
-        if (!isLoggedIn) {
-            synchronized(loginLock) {
-                if (!isLoggedIn) {
-                    performLogin()
-                }
+            if (path == "/wp-login.php" || path == "/login" || path == "/login/" || path.startsWith("/login/")) {
+                return chain.proceed(request)
             }
-        }
 
-        return chain.proceed(request)
-    }
+            val username = credentials.username
+            val password = credentials.password
 
-    private fun performLogin(): Boolean = try {
-        val loginForm = FormBody.Builder()
-            .add("log", credentials.username)
-            .add("pwd", credentials.password)
-            .add("wp-submit", "Log In")
-            .add("redirect_to", "$baseUrl/")
-            .add("testcookie", "1")
-            .build()
+            val cookies = client.cookieJar.loadForRequest(request.url)
+            val hasLoginCookie = cookies.any { it.name.startsWith("wordpress_logged_in_") }
 
-        val loginRequest = POST("$baseUrl/wp-login.php", headers, loginForm)
-        client.newCall(loginRequest).execute().use { response: Response ->
-            response.isSuccessful.also { success ->
-                if (success) {
-                    isLoggedIn = true
-                } else {
-                    Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(
-                            Injekt.get<Application>(),
-                            "MyReadingManga login failed. Please check your credentials.",
-                            Toast.LENGTH_LONG,
-                        ).show()
+            if (!hasLoginCookie && username.isNotBlank() && password.isNotBlank()) {
+                val loginBody = FormBody.Builder()
+                    .add("log", username)
+                    .add("pwd", password)
+                    .add("wp-submit", "Log In")
+                    .add("redirect_to", "$baseUrl/")
+                    .add("testcookie", "1")
+                    .build()
+
+                val loginRequest = POST("$baseUrl/wp-login.php", headers, loginBody)
+                chain.proceed(loginRequest).use { loginResponse ->
+                    if (!loginResponse.isSuccessful) {
+                        Handler(Looper.getMainLooper()).post {
+                            Toast.makeText(
+                                Injekt.get<Application>(),
+                                "MyReadingManga login failed. Please check your credentials.",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
                     }
                 }
             }
+
+            val response = chain.proceed(request)
+            val finalPath = response.request.url.encodedPath
+            if (finalPath == "/login" || finalPath == "/login/" || finalPath.startsWith("/login/")) {
+                response.close()
+                throw IOException("Please log in via extension settings")
+            }
+
+            return response
         }
-    } catch (_: Exception) {
-        false
     }
 
     // Preference Screen
@@ -164,10 +161,6 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             key = USERNAME_PREF
             title = "Username"
             summary = "Enter your username"
-            setOnPreferenceChangeListener { _, _ ->
-                isLoggedIn = false
-                true
-            }
         }
         val passwordPref = EditTextPreference(screen.context).apply {
             key = PASSWORD_PREF
@@ -175,10 +168,6 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
             summary = "Enter your password"
             setOnBindEditTextListener { et ->
                 et.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            }
-            setOnPreferenceChangeListener { _, _ ->
-                isLoggedIn = false
-                true
             }
         }
         screen.addPreference(usernamePref)
@@ -271,16 +260,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
     }
 
     // cleans up the name removing author and language from the title
-    // KNS
-    private val titleRegex = Regex("""\s*\[[^]]*]\s*""")
-    private val whitespaceRegex = Regex("""\s+""")
-    private fun cleanTitle(title: String): String = title
-        .replace(titleRegex, " ")
-        .trim()
-        .let { if (it.endsWith(")") && it.lastIndexOf('(') != -1) it.substringBeforeLast("(").trimEnd() else it }
-        .replace(whitespaceRegex, " ")
-        .trim()
-    // KNS
+    private fun cleanTitle(title: String) = title.replace(TITLE_REGEX, "").replace(Regex("""\s+"""), " ").trim()
 
     private fun cleanAuthor(author: String) = author.substringAfter("[").substringBefore("]").trim()
 
@@ -326,12 +306,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
         }
     }
 
-    // KNS
-    override fun mangaDetailsParse(response: Response): SManga {
-        val document = response.asJsoup()
-        return mangaDetailsParse(document, needCover = true)
-    }
-    // KNS
+    override fun mangaDetailsParse(response: Response): SManga = throw UnsupportedOperationException()
 
     // Start Chapter Get
     @SuppressLint("DefaultLocale")
@@ -433,7 +408,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
         // KNS
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
         private val EXTENSION_REGEX = Regex("""\.(jpg|png|jpeg|webp)""")
-        private val TITLE_REGEX = Regex("""\[[^]]*]""")
+        private val TITLE_REGEX = Regex("""^\s*\[[^]]*]\s*|\s*\[[^]]*].*$""")
         private val TOTAL_RESULTS_REGEX = Regex("""([\d,]+)""")
     }
 

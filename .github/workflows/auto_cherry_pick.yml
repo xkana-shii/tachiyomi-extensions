@@ -22,7 +22,7 @@ permissions:
 jobs:
   auto-merge:
     name: Auto cherry-pick Keiyoushi
-    if: github.repository == 'yuzono/tachiyomi-extensions'
+    if: github.repository == 'xkana-shii/tachiyomi-extensions'
     runs-on: ubuntu-latest
 
     steps:

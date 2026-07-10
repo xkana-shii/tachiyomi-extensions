@@ -98,7 +98,7 @@ jobs:
 
       - name: Upload APKs (${{ matrix.chunk.number }})
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: github.repository == 'yuzono/tachiyomi-extensions'
+        if: github.repository == 'xkana-shii/tachiyomi-extensions'
         with:
           name: "individual-apks-${{ matrix.chunk.number }}"
           path: |
@@ -115,7 +115,7 @@ jobs:
     # Run whenever there's anything to publish, new/changed builds OR only deletions
     if: >-
       always() &&
-      github.repository == 'yuzono/tachiyomi-extensions' &&
+      github.repository == 'xkana-shii/tachiyomi-extensions' &&
       needs.prepare.result == 'success' &&
       needs.build.result != 'failure' &&
       needs.build.result != 'cancelled' &&
@@ -139,7 +139,7 @@ jobs:
       - name: Checkout repo branch
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: yuzono/tachiyomi-repo
+          repository: xkana-shii/manga-repo
           token: ${{ secrets.BOT_PAT }}
           ref: repo
           path: repo
@@ -166,14 +166,14 @@ jobs:
           COMMIT_MESSAGE: ${{ needs.prepare.outputs.latestCommitMessage }}
         run: |
           cd repo
-          git config user.name "Yūzōnō"
-          git config user.email "yuzono@users.noreply.github.com"
-          git remote set-url origin https://github.com/yuzono/manga-repo.git
+          git config user.name "xkanashii"
+          git config user.email "xkana-shii@users.noreply.github.com"
+          git remote set-url origin https://github.com/xkana-shii/manga-repo.git
           git fetch origin
           git reset origin/repo
           git add -A
           git commit --amend -m "$COMMIT_MESSAGE" --no-sign --allow-empty || echo "No changes to commit"
           git push origin HEAD:repo --force
-          curl https://purge.jsdelivr.net/gh/yuzono/manga-repo@repo/index.min.json
-          curl https://purge.jsdelivr.net/gh/yuzono/manga-repo@repo/index.json
-          curl https://purge.jsdelivr.net/gh/yuzono/manga-repo@repo/index.pb
+          curl https://purge.jsdelivr.net/gh/xkana-shii/manga-repo@repo/index.min.json
+          curl https://purge.jsdelivr.net/gh/xkana-shii/manga-repo@repo/index.json
+          curl https://purge.jsdelivr.net/gh/xkana-shii/manga-repo@repo/index.pb

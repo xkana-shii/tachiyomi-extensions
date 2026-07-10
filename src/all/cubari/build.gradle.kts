@@ -4,7 +4,7 @@ plugins {
 
 keiyoushi {
     name = "Cubari"
-    versionCode = 26
+    versionCode = 27
     contentWarning = ContentWarning.SAFE
     libVersion = "1.4"
 

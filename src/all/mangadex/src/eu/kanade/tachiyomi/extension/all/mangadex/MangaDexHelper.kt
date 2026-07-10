@@ -147,14 +147,7 @@ class MangaDexHelper(lang: String) {
 
     /**
      * Remove any HTML characters in description to actual characters.
-     * It also removes Markdown syntax for links, italic and bold.
      */
-    private fun String.removeEntitiesAndMarkdown(): String = removeEntities()
-        .substringBefore("\n---")
-        .replace(markdownLinksRegex, "$1")
-        .replace(markdownItalicBoldRegex, "$1")
-        .replace(markdownItalicRegex, "$1")
-        .trim()
 
     /**
      * Maps MangaDex status to Tachiyomi status.
@@ -197,10 +190,6 @@ class MangaDexHelper(lang: String) {
         val USE_CACHE = CacheControl.Builder()
             .maxStale(Int.MAX_VALUE.seconds)
             .build()
-
-        val markdownLinksRegex = "\\[([^]]+)\\]\\(([^)]+)\\)".toRegex()
-        val markdownItalicBoldRegex = "\\*+\\s*([^\\*]*)\\s*\\*+".toRegex()
-        val markdownItalicRegex = "_+\\s*([^_]*)\\s*_+".toRegex()
 
         val titleSpecialCharactersRegex = "[^a-z0-9]+".toRegex()
 
@@ -362,7 +351,7 @@ class MangaDexHelper(lang: String) {
         val desc = mutableListOf<String>()
 
         (attr.description[lang] ?: attr.description["en"])
-            ?.removeEntitiesAndMarkdown()
+            ?.removeEntities()
             ?.let { desc.add(it) }
 
         if (altTitlesInDesc) {
@@ -373,9 +362,9 @@ class MangaDexHelper(lang: String) {
                 .filter(String::isNotEmpty)
 
             if (altTitles.isNotEmpty()) {
-                val altTitlesDesc = altTitles
-                    .joinToString("\n", "${intl["alternative_titles"]}\n") { "• $it" }
-                desc.add(altTitlesDesc.removeEntities())
+                val altTitlesDesc = "\n\n----\n#### " + intl["alternative_titles"] + "\n" +
+                    altTitles.joinToString("\n- ", prefix = "- ") { it.removeEntities() }
+                desc.add(altTitlesDesc)
             }
         }
 

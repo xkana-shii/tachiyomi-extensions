@@ -758,7 +758,7 @@ class MangaDex(
             key = MDConstants.getAltTitlesInDescPrefKey(dexLang)
             title = helper.intl["alternative_titles_in_description"]
             summary = helper.intl["alternative_titles_in_description_summary"]
-            setDefaultValue(false)
+            setDefaultValue(true)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean
@@ -773,7 +773,7 @@ class MangaDex(
             key = MDConstants.getPreferExtensionLangTitlePrefKey(dexLang)
             title = helper.intl["prefer_title_in_extension_language"]
             summary = helper.intl["prefer_title_in_extension_language_summary"]
-            setDefaultValue(true)
+            setDefaultValue(false)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean
@@ -788,7 +788,7 @@ class MangaDex(
             key = MDConstants.getFinalChapterInDescPrefKey(dexLang)
             title = helper.intl["final_chapter_in_description"]
             summary = helper.intl["final_chapter_in_description_summary"]
-            setDefaultValue(true)
+            setDefaultValue(false)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean
@@ -803,7 +803,7 @@ class MangaDex(
             key = MDConstants.getIncludeUnavailablePrefKey(dexLang)
             title = helper.intl["include_unavailable"]
             summary = helper.intl["include_unavailable_summary"]
-            setDefaultValue(false)
+            setDefaultValue(true)
 
             setOnPreferenceChangeListener { _, newValue ->
                 val checkValue = newValue as Boolean

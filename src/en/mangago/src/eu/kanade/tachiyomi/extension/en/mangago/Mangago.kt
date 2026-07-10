@@ -174,22 +174,22 @@ abstract class Mangago :
 
         return SManga.create().apply {
             // KNS
-            val removedTitleMatches = mutableListOf<String>()
+            val matches = mutableListOf<String>()
 
             fun String.applyRegexRemoval(regex: Regex): String = regex.findAll(this)
-                .onEach { removedTitleMatches.add(it.value) }
-                .fold(this) { acc, match -> acc.replace(match.value, "").trim() }
+                .onEach { matches.add(it.value) }
+                .fold(this) { acc, m -> acc.replace(m.value, "").trim() }
 
             document.selectFirst(".w-title h1")?.text()?.let {
-                val withBuiltInCleanup = if (isRemoveTitleVersion()) {
+                title = if (isRemoveTitleVersion()) {
                     it.applyRegexRemoval(titleRegex)
                 } else {
                     it
                 }
 
-                title = customRemoveTitle().takeIf { pattern -> pattern.isNotBlank() }
-                    ?.let { pattern -> withBuiltInCleanup.applyRegexRemoval(Regex(pattern, RegexOption.IGNORE_CASE)) }
-                    ?: withBuiltInCleanup
+                customRemoveTitle().takeIf { p -> p.isNotEmpty() }?.let { p ->
+                    title = title.applyRegexRemoval(Regex(p, RegexOption.IGNORE_CASE))
+                }
             }
             // KNS
 
@@ -207,7 +207,9 @@ abstract class Mangago :
                 info.select(".manga_info li, .manga_right tr").forEach { el ->
                     when (el.selectFirst("b, label")?.text()?.lowercase()) {
                         // KNS
-                        "alternative:" -> altTitles = el.text().substringAfter(":").trim()
+                        "alternative:" -> {
+                            altTitles = el.text().substringAfter(":").trim()
+                        }
                         // KNS
 
                         "status:" -> status = when (el.selectFirst("span")?.text()?.lowercase()) {
@@ -224,28 +226,27 @@ abstract class Mangago :
 
                 // KNS
                 val parsedAltTitles = altTitles
-                    .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("n/a", true) }
-                    ?.let { raw ->
-                        val pieces = if (raw.contains(';')) {
-                            raw.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
+                    .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("N/A", true) }
+                    ?.let { t ->
+                        if (t.contains(';')) {
+                            t.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
                                 .trimEnd(';')
                                 .split(Regex("\\s*;\\s*"))
                         } else {
-                            raw.trimEnd(',').split(Regex("\\s*,\\s*"))
+                            t.trimEnd(',').split(Regex("\\s*,\\s*"))
                         }
-
-                        pieces.filter { it.isNotBlank() }
-                            .joinToString("\n- ", prefix = "- ")
                     }
+                    ?.filter { it.isNotEmpty() }
+                    ?.joinToString("\n- ", prefix = "- ")
 
-                removedTitleMatches.removeAll { it.trim().equals("(Yaoi)", true) }
+                matches.removeAll { it.trim().equals("(Yaoi)", true) }
 
                 description = buildString {
                     description?.let(::append)
                     parsedAltTitles?.let { append("\n\n----\n#### **Alternative Titles**\n$it") }
-                    if (removedTitleMatches.isNotEmpty()) {
+                    if (matches.isNotEmpty()) {
                         append("\n\n----\n#### **Removed from title**\n")
-                        append(removedTitleMatches.joinToString("") { match -> "- `$match`\n" })
+                        append(matches.joinToString("") { m -> "- `$m`\n" })
                     }
                 }.trim().ifEmpty { null }
                 // KNS
@@ -263,7 +264,7 @@ abstract class Mangago :
 
     // ============================= Chapters ==============================
 
-    override fun chapterListRequest(manga: SManga): Request = GET("https://$readerDomain${manga.url}", headers)
+    override fun chapterListRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers)
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = client.newCall(chapterListRequest(manga))
         .asObservableSuccess()
@@ -276,8 +277,7 @@ abstract class Mangago :
     private fun chapterListSelector(): String = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
         "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
     } else {
-        "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), " +
-            "table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
+        "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
     }
     // KNS
 
@@ -311,6 +311,14 @@ abstract class Mangago :
                     if (scanlator.isNullOrEmpty()) {
                         scanlator = "Unknown"
                     }
+
+                    // KNS
+                    val isRaw = element.selectFirst("a[href*='/raw/']") != null
+
+                    if (isRaw) {
+                        name = "🉐 $name"
+                    }
+                    // KNS
                 }
             }
     }

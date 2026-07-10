@@ -7,7 +7,7 @@ keiyoushi {
     versionCode = 36
     contentWarning = ContentWarning.NSFW
     libVersion = "1.4"
-    kmkVersionCode = 1
+    kmkVersionCode = 2
 
     source {
         lang = "en"

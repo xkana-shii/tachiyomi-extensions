@@ -173,13 +173,25 @@ abstract class Mangago :
         val document = response.asJsoup()
 
         return SManga.create().apply {
+            // KNS
+            val removedTitleMatches = mutableListOf<String>()
+
+            fun String.applyRegexRemoval(regex: Regex): String = regex.findAll(this)
+                .onEach { removedTitleMatches.add(it.value) }
+                .fold(this) { acc, match -> acc.replace(match.value, "").trim() }
+
             document.selectFirst(".w-title h1")?.text()?.let {
-                title = if (isRemoveTitleVersion()) {
-                    it.replace(titleRegex, "")
+                val withBuiltInCleanup = if (isRemoveTitleVersion()) {
+                    it.applyRegexRemoval(titleRegex)
                 } else {
                     it
                 }
+
+                title = customRemoveTitle().takeIf { pattern -> pattern.isNotBlank() }
+                    ?.let { pattern -> withBuiltInCleanup.applyRegexRemoval(Regex(pattern, RegexOption.IGNORE_CASE)) }
+                    ?: withBuiltInCleanup
             }
+            // KNS
 
             document.getElementById("information")?.let { info: Element ->
                 thumbnail_url = info.selectFirst("img")?.attr("abs:src")
@@ -187,9 +199,16 @@ abstract class Mangago :
                     summary.selectFirst("font")?.remove()
                     summary.text()
                 }
+
+                // KNS
+                var altTitles = ""
+                // KNS
+
                 info.select(".manga_info li, .manga_right tr").forEach { el ->
                     when (el.selectFirst("b, label")?.text()?.lowercase()) {
-                        "alternative:" -> description = listOfNotNull(description, el.text()).joinToString("\n\n")
+                        // KNS
+                        "alternative:" -> altTitles = el.text().substringAfter(":").trim()
+                        // KNS
 
                         "status:" -> status = when (el.selectFirst("span")?.text()?.lowercase()) {
                             "ongoing" -> SManga.ONGOING
@@ -202,6 +221,34 @@ abstract class Mangago :
                         "genre(s):" -> genre = el.select("a").joinToString { it.text() }
                     }
                 }
+
+                // KNS
+                val parsedAltTitles = altTitles
+                    .takeUnless { it.isBlank() || it.equals("none", true) || it.equals("n/a", true) }
+                    ?.let { raw ->
+                        val pieces = if (raw.contains(';')) {
+                            raw.replace(Regex("\\s*(?:;\\s*){2,}"), ";")
+                                .trimEnd(';')
+                                .split(Regex("\\s*;\\s*"))
+                        } else {
+                            raw.trimEnd(',').split(Regex("\\s*,\\s*"))
+                        }
+
+                        pieces.filter { it.isNotBlank() }
+                            .joinToString("\n- ", prefix = "- ")
+                    }
+
+                removedTitleMatches.removeAll { it.trim().equals("(Yaoi)", true) }
+
+                description = buildString {
+                    description?.let(::append)
+                    parsedAltTitles?.let { append("\n\n----\n#### **Alternative Titles**\n$it") }
+                    if (removedTitleMatches.isNotEmpty()) {
+                        append("\n\n----\n#### **Removed from title**\n")
+                        append(removedTitleMatches.joinToString("") { match -> "- `$match`\n" })
+                    }
+                }.trim().ifEmpty { null }
+                // KNS
             }
         }
     }
@@ -225,9 +272,21 @@ abstract class Mangago :
         }
         .map(::chapterListParse)
 
+    // KNS
+    private fun chapterListSelector(): String = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
+        "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
+    } else {
+        "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), " +
+            "table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
+    }
+    // KNS
+
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
-        return document.select("table#chapter_table > tbody > tr, table.uk-table > tbody > tr")
+        return document
+            // KNS
+            .select(chapterListSelector())
+            // KNS
             .map { element ->
                 SChapter.create().apply {
                     val link = element.select("a.chico")
@@ -540,6 +599,10 @@ abstract class Mangago :
 
     private fun isRemoveTitleVersion() = preferences.getBoolean(REMOVE_TITLE_VERSION_PREF, false)
 
+    // KNS
+    private fun customRemoveTitle(): String = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+    // KNS
+
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
             key = REMOVE_TITLE_VERSION_PREF
@@ -550,6 +613,22 @@ abstract class Mangago :
                 "You might also want to clear the database in advanced settings."
             setDefaultValue(false)
         }.let(screen::addPreference)
+
+        // KNS
+        EditTextPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
+            title = "Remove custom information from title"
+            summary = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+            setDefaultValue("")
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_RAW_CHAPTERS_PREF
+            title = "Show raw chapters"
+            summary = "Include raw (untranslated) chapters in the chapter list."
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+        // KNS
 
         EditTextPreference(screen.context).apply {
             key = PREF_KEY_CUSTOM_UA
@@ -568,12 +647,14 @@ abstract class Mangago :
         }.also(screen::addPreference)
     }
 
+    // KNS
     private val titleRegex: Regex by lazy {
         Regex(
-            """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩)\s*)+|(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|/\s*Official)\s*)+$""",
+            """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|‹[^›]*›|-[^-]*-|/\s*Official|([|].*)|([/].*)|([~].*))\s*)+$""",
             RegexOption.IGNORE_CASE,
         )
     }
+    // KNS
 
     private val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.ENGLISH).apply {
         timeZone = TimeZone.getTimeZone("UTC")
@@ -609,6 +690,10 @@ abstract class Mangago :
 
     companion object {
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+        // KNS
+        private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"
+        private const val SHOW_RAW_CHAPTERS_PREF = "SHOW_RAW_CHAPTERS"
+        // KNS
         private const val PREF_KEY_CUSTOM_UA = "pref_key_custom_ua_"
     }
 }

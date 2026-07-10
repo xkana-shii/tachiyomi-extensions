@@ -112,6 +112,14 @@ class KemonoAttachmentDto(var name: String? = null, val path: String) {
     override fun toString() = path + if (name != null) "?f=$name" else ""
 }
 
+// KNS
+@Serializable
+class KemonoLoginRequestDto(
+    val username: String,
+    val password: String,
+)
+// KNS
+
 private fun getApiDateFormat() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)
 
 private fun getChapterNameDateFormat() = SimpleDateFormat("yyyy-MM-dd 'at' HH:mm:ss", Locale.ENGLISH)

@@ -698,9 +698,11 @@ abstract class Mangago :
 
     companion object {
         private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+
         // KNS
         private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"
         private const val SHOW_RAW_CHAPTERS_PREF = "SHOW_RAW_CHAPTERS"
+
         // KNS
         private const val PREF_KEY_CUSTOM_UA = "pref_key_custom_ua_"
     }

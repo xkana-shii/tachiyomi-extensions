@@ -146,10 +146,6 @@ class MangaDexHelper(lang: String) {
     private fun String.removeEntities(): String = Parser.unescapeEntities(this, false)
 
     /**
-     * Remove any HTML characters in description to actual characters.
-     */
-
-    /**
      * Maps MangaDex status to Tachiyomi status.
      * Adapted from the MangaDex handler from TachiyomiSY.
      */

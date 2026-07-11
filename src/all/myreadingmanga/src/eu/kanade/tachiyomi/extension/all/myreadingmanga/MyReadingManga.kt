@@ -42,7 +42,9 @@ import java.util.Locale
 private val dateFormat = SimpleDateFormat("MMM dd, yyyy", Locale.US)
 
 @Source
-abstract class MyReadingManga : HttpSource(), ConfigurableSource {
+abstract class MyReadingManga :
+    HttpSource(),
+    ConfigurableSource {
 
     private val siteLang: String
         get() = when (lang) {
@@ -405,6 +407,7 @@ abstract class MyReadingManga : HttpSource(), ConfigurableSource {
         // KNS
         private const val USERNAME_PREF = "MYREADINGMANGA_USERNAME"
         private const val PASSWORD_PREF = "MYREADINGMANGA_PASSWORD"
+
         // KNS
         private const val USER_AGENT = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36"
         private val EXTENSION_REGEX = Regex("""\.(jpg|png|jpeg|webp)""")

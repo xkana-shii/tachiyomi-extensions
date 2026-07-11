@@ -34,7 +34,9 @@ import org.json.JSONObject
 import rx.Observable
 
 @Source
-abstract class Cubari : HttpSource(), ConfigurableSource {
+abstract class Cubari :
+    HttpSource(),
+    ConfigurableSource {
 
     // KNS
     private val preferences by getPreferencesLazy()
@@ -609,6 +611,7 @@ abstract class Cubari : HttpSource(), ConfigurableSource {
         const val ARTIST_FALLBACK = "Unknown"
         const val DESCRIPTION_FALLBACK = "No description."
         const val SEARCH_FALLBACK_MSG = "Please enter a valid Cubari URL"
+
         // KNS
         private const val CUBARI_PROXY_PREFIX = "cubari://proxy/"
         private const val PREF_GITHUB_TOKEN = "cubari_github_token"

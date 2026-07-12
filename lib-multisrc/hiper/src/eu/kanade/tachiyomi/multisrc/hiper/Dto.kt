@@ -1,6 +1,5 @@
-package eu.kanade.tachiyomi.extension.pt.hipercool
+package eu.kanade.tachiyomi.multisrc.hiper
 
-import eu.kanade.tachiyomi.extension.pt.hipercool.Hipercool.Companion.MANGA_SUBSTRING
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
@@ -25,14 +24,16 @@ class MangaDto(
     val genres: List<String>? = null,
     val authors: List<String>? = null,
     val artists: List<String>? = null,
+    val type: String?,
+    val contentRating: String?,
 ) {
-    fun toSManga() = SManga.create().apply {
+    fun toSManga(mangaPath: String) = SManga.create().apply {
         title = this@MangaDto.title
         description = synopsis
         thumbnail_url = coverUrl
         artist = artists?.joinToString()
         author = authors?.joinToString()
-        genre = genres?.joinToString()
+        genre = ((genres ?: emptyList()) + listOfNotNull(type, contentRating)).joinToString()
         status = when (this@MangaDto.status?.lowercase()) {
             "ongoing" -> SManga.ONGOING
             "hiatus" -> SManga.ON_HIATUS
@@ -40,7 +41,7 @@ class MangaDto(
             "completed" -> SManga.COMPLETED
             else -> SManga.UNKNOWN
         }
-        url = "/${MANGA_SUBSTRING}/$slug#${this@MangaDto.id}"
+        url = "/$mangaPath/$slug#${this@MangaDto.id}"
         initialized = true
     }
 }
@@ -65,7 +66,7 @@ class ChapterDto(
         }
     } ?: labelNumber
 
-    private val labelNumber: String get() = "Capítulo ${number.toString().replace(".0", "")}"
+    private val labelNumber: String get() = "Chapter ${number.toString().replace(".0", "")}"
 
     companion object {
         private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ROOT)

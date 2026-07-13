@@ -20,8 +20,6 @@ import keiyoushi.annotation.Source
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.parseAs
 import keiyoushi.utils.toJsonString
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -613,7 +611,11 @@ abstract class Kagane :
             Filter.Separator(),
         )
 
-        fetchMetadata()
+        // KNS
+        if (metadata == null) {
+            fetchMetadata()
+        }
+        // KNS
 
         val meta = metadata
 
@@ -648,34 +650,32 @@ abstract class Kagane :
     }
 
     private fun fetchMetadata() {
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val genres = metadataClient.newCall(
-                    GET("$apiUrl/api/v2/genres/list", apiHeaders),
-                ).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    resp.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
-                }
-                val tags = metadataClient.newCall(
-                    GET("$apiUrl/api/v2/tags/list", apiHeaders),
-                ).execute().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    resp.parseAs<List<TagDto>>().associate { it.id to it.tagName }
-                }
-                val sources = getSourcesResponse().use { resp ->
-                    if (!resp.isSuccessful) return@use null
-                    resp.parseAs<SourcesDto>().sources
-                }
-
-                if (genres != null && tags != null && sources != null) {
-                    metadata = MetadataDto(genres, tags, sources)
-                    Log.d(name, "Metadata fetched and updated")
-                } else {
-                    Log.e(name, "Failed to fetch metadata: One or more requests failed")
-                }
-            } catch (e: Exception) {
-                Log.e(name, "Failed to fetch metadata", e)
+        try {
+            val genres = metadataClient.newCall(
+                GET("$apiUrl/api/v2/genres/list", apiHeaders),
+            ).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                resp.parseAs<List<GenreDto>>().associate { it.id to it.genreName }
             }
+            val tags = metadataClient.newCall(
+                GET("$apiUrl/api/v2/tags/list", apiHeaders),
+            ).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                resp.parseAs<List<TagDto>>().associate { it.id to it.tagName }
+            }
+            val sources = getSourcesResponse().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                resp.parseAs<SourcesDto>().sources
+            }
+
+            if (genres != null && tags != null && sources != null) {
+                metadata = MetadataDto(genres, tags, sources)
+                Log.d(name, "Metadata fetched and updated")
+            } else {
+                Log.e(name, "Failed to fetch metadata: One or more requests failed")
+            }
+        } catch (e: Exception) {
+            Log.e(name, "Failed to fetch metadata", e)
         }
     }
 }

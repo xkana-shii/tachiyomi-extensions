@@ -9,7 +9,7 @@ keiyoushi {
     versionCode = 27
     contentWarning = ContentWarning.MIXED
     libVersion = "1.4"
-    kmkVersionCode = 2
+    kmkVersionCode = 3
 
     listOf("en", "ja", "ko", "zh", "es", "es-419", "fr", "de", "pt", "pt-BR", "ru", "it", "id", "vi", "th", "pl", "hi", "ar").forEach {
         source {

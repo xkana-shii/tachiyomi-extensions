@@ -3,8 +3,6 @@ package eu.kanade.tachiyomi.extension.all.buondua
 import android.content.SharedPreferences
 import androidx.preference.PreferenceScreen
 import androidx.preference.SwitchPreferenceCompat
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.network.awaitSuccess
 import eu.kanade.tachiyomi.source.ConfigurableSource
 import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
@@ -12,23 +10,27 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
 import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
 import keiyoushi.lib.randomua.UserAgentType
 import keiyoushi.lib.randomua.setRandomUserAgent
+import keiyoushi.network.get
 import keiyoushi.network.rateLimit
+import keiyoushi.source.KeiSource
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.getPreferencesLazy
 import keiyoushi.utils.tryParse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonElement
+import okhttp3.Headers
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.Request
+import okhttp3.OkHttpClient
 import okhttp3.Response
 import org.jsoup.nodes.Document
 import java.text.SimpleDateFormat
@@ -37,49 +39,38 @@ import kotlin.time.Duration.Companion.seconds
 
 @Source
 abstract class BuonDua :
-    HttpSource(),
+    KeiSource(),
     ConfigurableSource {
     private val baseUrlHost by lazy { baseUrl.toHttpUrl().host }
 
-    override val supportsLatest = true
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = rateLimit(10, 1.seconds) { it.host == baseUrlHost }
 
-    override val client = network.client.newBuilder()
-        .rateLimit(10, 1.seconds) { it.host == baseUrlHost }
-        .build()
-
-    override fun headersBuilder() = super.headersBuilder()
-        .add("Referer", "$baseUrl/")
-        .setRandomUserAgent(UserAgentType.MOBILE)
+    override fun Headers.Builder.configureHeaders(): Headers.Builder = setRandomUserAgent(UserAgentType.MOBILE)
 
     private val preferences by getPreferencesLazy()
 
     // Latest
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/?start=${20 * (page - 1)}", headers)
-
-    override fun latestUpdatesParse(response: Response): MangasPage = parseMangasPage(response)
+    override suspend fun getLatestUpdates(page: Int): MangasPage = parseMangasPage(client.get("$baseUrl/?start=${20 * (page - 1)}"))
 
     // Popular
-    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/hot?start=${20 * (page - 1)}", headers)
-
-    override fun popularMangaParse(response: Response): MangasPage = parseMangasPage(response)
+    override suspend fun getPopularManga(page: Int): MangasPage = parseMangasPage(client.get("$baseUrl/hot?start=${20 * (page - 1)}"))
 
     // Search
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
+    override suspend fun getSearchMangaList(page: Int, query: String, filters: FilterList): MangasPage {
         val tagFilter = filters.firstInstanceOrNull<Filter.Text>()
         return when {
             query.isNotEmpty() -> {
-                val urlBuilder = baseUrl.toHttpUrl().newBuilder().apply {
+                val url = baseUrl.toHttpUrl().newBuilder().apply {
                     addQueryParameter("search", query)
                     addQueryParameter("start", (20 * (page - 1)).toString())
-                }
-                GET(urlBuilder.build(), headers)
+                }.build()
+                parseMangasPage(client.get(url))
             }
-            tagFilter?.state?.isNotEmpty() == true -> GET("$baseUrl/tag/${tagFilter.state}&start=${20 * (page - 1)}", headers)
-            else -> popularMangaRequest(page)
+            tagFilter?.state?.isNotEmpty() == true ->
+                parseMangasPage(client.get("$baseUrl/tag/${tagFilter.state}&start=${20 * (page - 1)}"))
+            else -> getPopularManga(page)
         }
     }
-
-    override fun searchMangaParse(response: Response): MangasPage = parseMangasPage(response)
 
     private fun parseMangasPage(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -95,54 +86,70 @@ abstract class BuonDua :
         return MangasPage(mangas, hasNextPage)
     }
 
-    // Details
-    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}"
-
-    override fun mangaDetailsParse(response: Response): SManga {
-        val document = response.asJsoup()
-        return SManga.create().apply {
-            document.selectFirst(".article-header")?.text()
-                ?.replace(titlePageRegex, "")?.trim()
-                ?.let { title = it }
-
-            val articleInfo = document.select(".article-info > strong").text()
-                .replace("Buondua", "").trim()
-
-            val password = document.select("code").text()
-            val downloadAvailable = document.select(".article-links a[href]")
-            val downloadLinks = downloadAvailable.joinToString("\n") { element ->
-                val serviceText = element.text()
-                val link = element.attr("href")
-                "[$serviceText]($link)"
-            }
-
-            description = StringBuilder().apply {
-                if (articleInfo.isNotBlank()) {
-                    append(articleInfo)
-                }
-                if (downloadLinks.isNotBlank()) {
-                    if (isNotEmpty()) append("\n\n")
-                    append(downloadLinks)
-                }
-                if (password.isNotBlank()) {
-                    if (isNotEmpty()) append("\n\n")
-                    append(password)
-                }
-            }.toString().trim()
-
-            genre = document.selectFirst(".article-tags")?.select(".tags > .tag")
-                ?.joinToString { it.text().substringAfter("#") }
-                ?.takeIf { it.isNotBlank() }
+    // Deeplink
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrlHost) return null
+        val manga = SManga.create().apply { setUrlWithoutDomain(url.toString()) }
+        return fetchMangaUpdate(manga, emptyList(), fetchDetails = true, fetchChapters = false).manga.apply {
+            this.url = manga.url
+            initialized = true
         }
     }
 
+    // Details
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl${manga.url}"
+
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        val document = client.get(getMangaUrl(manga)).asJsoup()
+        return SMangaUpdate(parseMangaDetails(document), parseChapterList(document))
+    }
+
+    private fun parseMangaDetails(document: Document): SManga = SManga.create().apply {
+        document.selectFirst(".article-header")?.text()
+            ?.replace(titlePageRegex, "")?.trim()
+            ?.let { title = it }
+
+        val articleInfo = document.select(".article-info > strong").text()
+            .replace("Buondua", "").trim()
+
+        val password = document.select("code").text()
+        val downloadAvailable = document.select(".article-links a[href]")
+        val downloadLinks = downloadAvailable.joinToString("\n") { element ->
+            val serviceText = element.text()
+            val link = element.attr("href")
+            "[$serviceText]($link)"
+        }
+
+        description = StringBuilder().apply {
+            if (articleInfo.isNotBlank()) {
+                append(articleInfo)
+            }
+            if (downloadLinks.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append(downloadLinks)
+            }
+            if (password.isNotBlank()) {
+                if (isNotEmpty()) append("\n\n")
+                append(password)
+            }
+        }.toString().trim()
+
+        genre = document.selectFirst(".article-tags")?.select(".tags > .tag")
+            ?.joinToString { it.text().substringAfter("#") }
+            ?.takeIf { it.isNotBlank() }
+    }
+
     // Chapters
-    override fun chapterListParse(response: Response): List<SChapter> {
-        val doc = response.asJsoup()
+    private fun parseChapterList(doc: Document): List<SChapter> {
         val dateUploadStr = doc.selectFirst(".article-info > small")?.text()
         val dateUpload = DATE_FORMAT.tryParse(dateUploadStr)
 
-        val basePageUrl = response.request.url.toString()
+        val basePageUrl = doc.location()
 
         return if (preferences.splitPages) {
             val maxPage = doc.getLastPageNum()
@@ -172,15 +179,23 @@ abstract class BuonDua :
         }
     }
 
+    override fun getChapterUrl(chapter: SChapter): String = "$baseUrl${chapter.url}"
+
+    // Related
+    override suspend fun fetchRelatedMangaList(manga: SManga): List<SManga> {
+        val response = client.get(getMangaUrl(manga))
+        return parseMangasPage(response).mangas
+    }
+
     // Pages
     private val pageListSelector = ".article-fulltext img"
 
-    override fun pageListParse(response: Response): List<Page> {
-        val document = response.asJsoup()
+    override suspend fun getPageList(chapter: SChapter): List<Page> {
+        val document = client.get(getChapterUrl(chapter)).asJsoup()
         return if (preferences.splitPages) {
             pageListParse(document)
         } else {
-            runBlocking { pageListMerge(document) }
+            pageListMerge(document)
         }
     }
 
@@ -192,21 +207,23 @@ abstract class BuonDua :
         val basePageUrl = document.location()
         val maxPage = document.getLastPageNum()
 
-        return (1..maxPage).parallelCatchingFlatMap { page ->
-            val doc = when (page) {
-                1 -> document
-                else -> {
-                    val pageUrl = basePageUrl.toHttpUrl().newBuilder()
-                        .setQueryParameter("page", page.toString())
-                        .build()
-                        .toString()
-                    client.newCall(GET(pageUrl, headers)).awaitSuccess()
-                        .use { it.asJsoup() }
+        return withContext(Dispatchers.IO) {
+            (1..maxPage).map { page ->
+                async {
+                    val doc = when (page) {
+                        1 -> document
+                        else -> {
+                            val pageUrl = basePageUrl.toHttpUrl().newBuilder()
+                                .setQueryParameter("page", page.toString())
+                                .build()
+                            client.get(pageUrl).asJsoup()
+                        }
+                    }
+                    doc.select(pageListSelector).map { imgEl ->
+                        imgEl.absUrl("src")
+                    }
                 }
-            }
-            doc.select(pageListSelector).map { imgEl ->
-                imgEl.absUrl("src")
-            }
+            }.awaitAll().flatten()
         }.mapIndexed { index, url ->
             Page(index, imageUrl = url)
         }
@@ -218,10 +235,8 @@ abstract class BuonDua :
         ?.toHttpUrlOrNull()
         ?.queryParameter("page")?.toIntOrNull() ?: 1
 
-    override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
-
     // Filters
-    override fun getFilterList(): FilterList = FilterList(
+    override fun getFilterList(data: JsonElement?): FilterList = FilterList(
         Filter.Header("NOTE: Ignored if using text search!"),
         Filter.Separator(),
         object : Filter.Text("Tag ID") {},
@@ -241,29 +256,12 @@ abstract class BuonDua :
         }.also(screen::addPreference)
     }
 
-    /**
-     * Parallel implementation of [Iterable.flatMap], but running
-     * the transformation function inside a try-catch block.
-     */
-    private suspend inline fun <A, B> Iterable<A>.parallelCatchingFlatMap(crossinline f: suspend (A) -> Iterable<B>): List<B> = withContext(Dispatchers.IO) {
-        map {
-            async {
-                try {
-                    f(it)
-                } catch (e: Throwable) {
-                    e.printStackTrace()
-                    emptyList()
-                }
-            }
-        }.awaitAll().flatten()
-    }
-
     companion object {
+        private const val PREF_SPLIT_PAGES = "pref_split_pages"
+        private const val DEFAULT_SPLIT_PAGES = true
+
         private val DATE_FORMAT = SimpleDateFormat("HH:mm dd-MM-yyyy", Locale.US)
 
         private val titlePageRegex by lazy { Regex(""" - \( Page \d+ / \d+ \)""") }
-
-        private const val PREF_SPLIT_PAGES = "pref_split_pages"
-        private const val DEFAULT_SPLIT_PAGES = true
     }
 }

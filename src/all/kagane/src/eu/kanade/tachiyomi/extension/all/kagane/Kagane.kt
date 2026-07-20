@@ -571,18 +571,30 @@ abstract class Kagane :
         private const val DATA_SAVER = "data_saver_default"
 
         private const val CHAPTER_TITLE_MODE = "chapter_title_mode"
-        private const val CHAPTER_TITLE_MODE_DEFAULT = "optional"
+
+        // KNS
+        private const val CHAPTER_TITLE_MODE_DEFAULT = "smart_vol_chapter"
+        // KNS
+
         internal val CHAPTER_TITLE_MODES = arrayOf(
             "optional",
             "always",
             "vol_local",
             "vol_chapter",
+            // KNS
+            "smart_vol_chapter",
+            "smart",
+            // KNS
         )
         internal val CHAPTER_TITLE_MODE_NAMES = arrayOf(
             "Title only (e.g. 'Manga Title' / 'Ch.5')",
             "Ch.X + title (e.g. 'Ch.5 Manga Title')",
             "Vol.X Ch.Y (e.g. 'Vol.1 Ch.5')",
             "Vol.X Ch.Y + title (e.g. 'Vol.1 Ch.5 Manga Title')",
+            // KNS
+            "Smart Vol.X Ch.Y + title",
+            "Smart",
+            // KNS
         )
     }
 

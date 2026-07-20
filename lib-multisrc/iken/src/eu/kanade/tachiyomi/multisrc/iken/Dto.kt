@@ -2,18 +2,49 @@ package eu.kanade.tachiyomi.multisrc.iken
 
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
-import keiyoushi.utils.tryParse
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.jsoup.Jsoup
-import java.text.SimpleDateFormat
-import java.util.Locale
+import kotlin.time.Instant
 
 @Serializable
 class SearchResponse(
     val posts: List<Manga>,
     val totalCount: Int,
+)
+
+@Serializable
+class MangaDto(
+    val post: Manga,
+)
+
+@Serializable
+class ChapterDto(
+    val post: ChapterPost,
+)
+
+@Serializable
+class ChapterPost(
+    val chapters: List<Chapter>,
+)
+
+@Serializable
+class PageResponse(
+    val chapter: Page,
+)
+
+@Serializable
+class ViewQuery(
+    val postId: Int?,
+    val chapterId: Int?,
+)
+
+@Serializable
+class RelatedMangaDto(
+    val recommendations: List<Manga>,
 )
 
 @Serializable
@@ -31,6 +62,7 @@ class Manga(
     private val seriesType: String? = null,
     private val seriesStatus: String? = null,
     private val genres: List<Genre> = emptyList(),
+    val chapters: List<Chapter> = emptyList(),
 ) {
 
     val isNovel: Boolean
@@ -45,6 +77,10 @@ class Manga(
         description = getDescription(postContent)
         genre = getGenres()
         status = getStatus()
+        memo = buildJsonObject {
+            put("id", id)
+            put("slug", slug)
+        }
     }
 
     fun getDescription(postContent: String?) = buildString {
@@ -59,7 +95,7 @@ class Manga(
     }.trim()
 
     private fun getStatus() = when (seriesStatus) {
-        "ONGOING", "COMING_SOON" -> SManga.ONGOING
+        "ONGOING", "COMING_SOON", "MASS_RELEASED" -> SManga.ONGOING
         "COMPLETED" -> SManga.COMPLETED
         "CANCELLED", "DROPPED" -> SManga.CANCELLED
         else -> SManga.UNKNOWN
@@ -88,36 +124,18 @@ class DescriptionDto(
 )
 
 @Serializable
-class Post<T>(val post: T)
-
-@Serializable
-class RelatedMangaDto(
-    val recommendations: List<Manga>,
-)
-
-@Serializable
-class ChapterListResponse(
-    val isNovel: Boolean = false,
-    val slug: String? = null,
-    val id: Int? = null,
-    val chapters: List<Chapter>,
-)
-
-@Serializable
 class Chapter(
     private val id: Int,
     private val slug: String,
     private val number: JsonPrimitive,
     private val title: String? = null,
     private val createdAt: String,
-    private val chapterStatus: String,
     private val isAccessible: Boolean,
     private val isLocked: Boolean? = false,
     private val isTimeLocked: Boolean? = false,
     private val mangaPost: MangaPostDto? = null,
+    private val createdBy: CreatorDto? = null,
 ) {
-    fun isPublic() = chapterStatus == "PUBLIC"
-
     fun isAccessible() = isAccessible
 
     fun isLocked() = (isLocked == true) || (isTimeLocked == true)
@@ -128,7 +146,13 @@ class Chapter(
         val seriesSlug = (mangaSlug ?: mangaPost?.slug)!!
         url = "/series/$seriesSlug/$slug#$id"
         name = "${prefix}Chapter $number$suffix"
-        date_upload = dateFormat.tryParse(createdAt)
+        date_upload = Instant.parseOrNull(createdAt)?.toEpochMilliseconds() ?: 0L
+        scanlator = createdBy?.name
+        memo = buildJsonObject {
+            put("seriesSlug", seriesSlug)
+            put("slug", slug)
+            put("id", id)
+        }
     }
 }
 
@@ -138,19 +162,12 @@ class MangaPostDto(
 )
 
 @Serializable
-class PageResponse(
-    val chapter: Page,
-)
-
-@Serializable
-class PageParseDto(
-    val url: String,
-    val order: Int? = null,
+class CreatorDto(
+    val name: String? = null,
 )
 
 @Serializable
 class Page(
-    val id: Int? = null,
     val images: List<PageParseDto>,
     val isPermanentlyLocked: Boolean = false,
     val isLockedByCoins: Boolean = false,
@@ -158,9 +175,7 @@ class Page(
 )
 
 @Serializable
-class ViewQuery(
-    val postId: Int?,
-    val chapterId: Int?,
+class PageParseDto(
+    val url: String,
+    val order: Int? = null,
 )
-
-private val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.ENGLISH)

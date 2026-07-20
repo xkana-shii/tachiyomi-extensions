@@ -6,7 +6,7 @@ plugins {
 
 keiyoushi {
     name = "Kagane"
-    versionCode = 27
+    versionCode = 28
     contentWarning = ContentWarning.MIXED
     libVersion = "1.4"
     kmkVersionCode = 3
@@ -17,9 +17,4 @@ keiyoushi {
             baseUrl = "https://kagane.to"
         }
     }
-}
-
-dependencies {
-
-    compileOnly("com.squareup.okhttp3:okhttp-brotli:5.0.0-alpha.11")
 }

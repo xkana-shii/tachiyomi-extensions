@@ -171,12 +171,6 @@ class DetailsDto(
             desc.append("\n")
         }
 
-        // Add source name
-        if (sourceName != null && this@DetailsDto.sourceId != null) {
-            if (desc.isNotEmpty()) desc.append("\n")
-            desc.append("Source: [$sourceName]($baseUrl/sources/${this@DetailsDto.sourceId})\n")
-        }
-
         // Add alternate titles at the end
         if (seriesAlternateTitles.isNotEmpty()) {
             if (desc.isNotEmpty()) desc.append("\n")
@@ -201,6 +195,7 @@ class DetailsDto(
         author = authors.joinToString()
         description = desc.toString().trim()
         genre = buildList {
+            sourceName?.takeIf { it.isNotBlank() }?.let { add(it) }
             this@DetailsDto.format?.takeIf { it.isNotBlank() }?.let { add(it) }
             addAll(genres.map { it.genreName })
         }.joinToString()
@@ -308,7 +303,7 @@ class ChapterDto(
                     }
                 }
 
-                "smart" -> {
+                else -> {
                     if (chapterNo.isNullOrBlank()) return trimmedTitle
                     if (trimmedTitle.isEmpty()) return "Ch.$chapterNo"
 
@@ -327,8 +322,6 @@ class ChapterDto(
                     "Ch.$chapterNo $trimmedTitle"
                 }
                 // KNS
-
-                else -> trimmedTitle
             }
         }
     }
@@ -337,6 +330,7 @@ class ChapterDto(
     class Group(
         val title: String,
     )
+
     companion object {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.ENGLISH)
 

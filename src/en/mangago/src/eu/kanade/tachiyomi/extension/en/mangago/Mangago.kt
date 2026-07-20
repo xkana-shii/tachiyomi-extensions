@@ -198,7 +198,7 @@ abstract class Mangago :
                 description = info.selectFirst(".manga_summary")?.let { summary: Element ->
                     summary.selectFirst("font")?.remove()
                     summary.text()
-                }
+                }?.takeIf { !it.equals("not found...", ignoreCase = true) }
 
                 info.select(".manga_info li, .manga_right tr").forEach { el ->
                     when (el.selectFirst("b, label")?.text()?.lowercase()) {
@@ -272,7 +272,7 @@ abstract class Mangago :
 
     // ============================= Chapters ==============================
 
-    override fun chapterListRequest(manga: SManga): Request = GET("$baseUrl${manga.url}", headers)
+    override fun chapterListRequest(manga: SManga): Request = GET("https://$readerDomain${manga.url}", headers)
 
     override fun fetchChapterList(manga: SManga): Observable<List<SChapter>> = client.newCall(chapterListRequest(manga))
         .asObservableSuccess()

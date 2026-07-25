@@ -64,7 +64,7 @@ class SearchDto(
     ) {
 
         fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>, cleanTitle: Boolean): SManga = SManga.create().apply {
-            title = if (showSource) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
+            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
             url = id
             thumbnail_url = coverImage?.let { "$apiUrl/image/$it" }
         }
@@ -89,7 +89,7 @@ class TrackerDto(
     ) {
 
         fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>, cleanTitle: Boolean): SManga = SManga.create().apply {
-            title = if (showSource) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
+            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
             url = id
             thumbnail_url = coverImage?.let { "$apiUrl/image/$it" }
         }
@@ -167,7 +167,7 @@ class DetailsDto(
 
         // Add main description
         this@DetailsDto.description?.takeIf { it.isNotBlank() }?.let {
-            desc.append(Jsoup.parse(it.trim()).text())
+            desc.append(Jsoup.parse(it.trim().replace("\n", "<br>")).wholeText())
             desc.append("\n")
         }
 
@@ -244,7 +244,12 @@ class ChapterDto(
             }
             scanlator = buildString {
                 append(groups.joinToString(", ") { it.title })
-                BRACKET_REGEX.find(title)?.groupValues?.get(1)?.let { append(" " + it.trim()) }
+
+                // Extract group tags in chapter title
+                CHAPTER_GROUP_REGEX.matchEntire(METADATA_REGEX.replace(title.trim(), ""))?.let { match ->
+                    val groupTag = match.groups[1]?.value ?: match.groups[2]?.value
+                    groupTag?.let { append(" ($it)") }
+                }
             }
         }
 
@@ -386,5 +391,12 @@ class IntegrityDto(
 )
 
 private val BRACKET_REGEX = Regex("""(\([^()]*\)|\[[^\[\]]*\])\s*$""")
+
+private val METADATA_REGEX = Regex("""(?:\s*\{[^{}]*\})+\s*$""")
+
+private val CHAPTER_GROUP_REGEX = Regex(
+    """^Chapter\s+.*(?:-\s*Volume\s+.*\(([^()]+)\)|\[([^\[\]]+)\])\s*$""",
+    RegexOption.IGNORE_CASE,
+)
 
 private fun String.clean(removeExtras: Boolean): String = if (removeExtras) this.replace(BRACKET_REGEX, "").trim() else this.trim()

@@ -16,4 +16,5 @@ This repository contains extension catalogues compatible with Komikku, Mihon, Ta
 * **Manual Installation:** Copy and paste the following URL into your application:
 
 ```html
-[https://raw.githubusercontent.com/xkana-shii/manga-repo/repo/index.min.json](https://raw.githubusercontent.com/xkana-shii/manga-repo/repo/index.min.json)
+[https://github.com/xkana-shii/manga-repo/raw/repo/index.pb](https://github.com/xkana-shii/manga-repo/raw/repo/index.pb)
+```

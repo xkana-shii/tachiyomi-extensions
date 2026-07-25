@@ -30,48 +30,40 @@ abstract class DesireScans : KeiSource() {
 
     override val supportsFilterFetching = true
 
-    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder {
-        return addInterceptor { chain ->
-            val originalRequest = chain.request()
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder = addInterceptor { chain ->
+        val originalRequest = chain.request()
 
-            val request = if (originalRequest.url.host == MEDIA_HOST) {
-                originalRequest.newBuilder()
-                    .header("Referer", "$baseUrl/")
-                    .build()
-            } else {
-                originalRequest
-            }
-
-            chain.proceed(request)
+        val request = if (originalRequest.url.host == MEDIA_HOST) {
+            originalRequest.newBuilder()
+                .header("Referer", "$baseUrl/")
+                .build()
+        } else {
+            originalRequest
         }
+
+        chain.proceed(request)
     }
 
     override suspend fun getPopularManga(
         page: Int,
-    ): MangasPage {
-        return getBrowsePage(
-            page = page,
-            forcedSort = POPULAR_SORT,
-        )
-    }
+    ): MangasPage = getBrowsePage(
+        page = page,
+        forcedSort = POPULAR_SORT,
+    )
 
     override suspend fun getLatestUpdates(
         page: Int,
-    ): MangasPage {
-        return getBrowsePage(page = page)
-    }
+    ): MangasPage = getBrowsePage(page = page)
 
     override suspend fun getSearchMangaList(
         page: Int,
         query: String,
         filters: FilterList,
-    ): MangasPage {
-        return getBrowsePage(
-            page = page,
-            query = query,
-            filters = filters,
-        )
-    }
+    ): MangasPage = getBrowsePage(
+        page = page,
+        query = query,
+        filters = filters,
+    )
 
     private suspend fun getBrowsePage(
         page: Int,
@@ -389,24 +381,22 @@ abstract class DesireScans : KeiSource() {
             .toList()
     }
 
-    private fun Document.toPageList(): List<Page> {
-        return select(
-            "[data-page] img[src], " +
-                "[data-page] img[data-src], " +
-                "img[alt^=\"Page\"][src], " +
-                "img[alt^=\"Page\"][data-src]",
-        )
-            .mapNotNull { image ->
-                image.extractImageUrl()
-            }
-            .distinct()
-            .mapIndexed { index, imageUrl ->
-                Page(
-                    index = index,
-                    imageUrl = imageUrl,
-                )
-            }
-    }
+    private fun Document.toPageList(): List<Page> = select(
+        "[data-page] img[src], " +
+            "[data-page] img[data-src], " +
+            "img[alt^=\"Page\"][src], " +
+            "img[alt^=\"Page\"][data-src]",
+    )
+        .mapNotNull { image ->
+            image.extractImageUrl()
+        }
+        .distinct()
+        .mapIndexed { index, imageUrl ->
+            Page(
+                index = index,
+                imageUrl = imageUrl,
+            )
+        }
 
     private fun String.toReaderPollResult(): ReaderPollResult {
         val trimmedResult = trim()
@@ -451,9 +441,7 @@ abstract class DesireScans : KeiSource() {
 
     override fun getMangaUrl(
         manga: SManga,
-    ): String {
-        return "$baseUrl/series/comic/${manga.url}"
-    }
+    ): String = "$baseUrl/series/comic/${manga.url}"
 
     override fun getChapterUrl(
         chapter: SChapter,
@@ -534,21 +522,19 @@ abstract class DesireScans : KeiSource() {
         )
     }
 
-    private fun Document.getBookMetadata(): BookDto? {
-        return select(
-            "script[type=application/ld+json]",
-        )
-            .mapNotNull { script ->
-                runCatching {
-                    script
-                        .data()
-                        .parseAs<BookDto>()
-                }.getOrNull()
-            }
-            .firstOrNull {
-                it.type == BOOK_SCHEMA_TYPE
-            }
-    }
+    private fun Document.getBookMetadata(): BookDto? = select(
+        "script[type=application/ld+json]",
+    )
+        .mapNotNull { script ->
+            runCatching {
+                script
+                    .data()
+                    .parseAs<BookDto>()
+            }.getOrNull()
+        }
+        .firstOrNull {
+            it.type == BOOK_SCHEMA_TYPE
+        }
 
     private fun Element.extractImageUrl(): String? {
         val source = absUrl("src")
@@ -619,13 +605,11 @@ abstract class DesireScans : KeiSource() {
 
     private fun resolveUrl(
         url: String,
-    ): String {
-        return baseUrl
-            .toHttpUrl()
-            .resolve(url)
-            ?.toString()
-            ?: url
-    }
+    ): String = baseUrl
+        .toHttpUrl()
+        .resolve(url)
+        ?.toString()
+        ?: url
 
     private class ReaderPollResult(
         val totalPages: Int,

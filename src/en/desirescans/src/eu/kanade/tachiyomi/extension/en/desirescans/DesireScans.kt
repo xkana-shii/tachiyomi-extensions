@@ -1,249 +1,422 @@
 package eu.kanade.tachiyomi.extension.en.desirescans
 
-import eu.kanade.tachiyomi.network.GET
-import eu.kanade.tachiyomi.source.model.Filter
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
+import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
+import keiyoushi.network.get
 import keiyoushi.source.KeiSource
+import keiyoushi.utils.extractNextJs
+import keiyoushi.utils.firstInstanceOrNull
+import keiyoushi.utils.parseAs
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
-import okhttp3.Request
-import okhttp3.Response
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 
 @Source
-    class DesireScans : KeiSource() {
+abstract class DesireScans : KeiSource() {
 
-    override val supportsLatest = true
+    override val supportsFilterFetching = true
 
-    // KNS
-    private var filterCacheLoaded = false
-    private var dynamicSorts: List<Pair<String, String>> = listOf("Recently Updated" to "updated")
-    private var dynamicStatuses: List<Pair<String, String>> = listOf("All" to "")
-    private var dynamicOrigins: List<Pair<String, String>> = listOf("All Origins" to "")
-    private var dynamicTypes: List<Pair<String, String>> = listOf("All" to "")
-    private var dynamicGenres: List<Pair<String, String>> = emptyList()
-    private var dynamicTags: List<Pair<String, String>> = emptyList()
-    // KNS
-
-    override fun popularMangaRequest(page: Int): Request {
-        // KNS
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("series")
-            .addQueryParameter("sort", "popular")
-            .addQueryParameter("page", page.toString())
-            .build()
-        // KNS
-        return GET(url, headers)
-    }
-
-    override fun popularMangaParse(response: Response): MangasPage = searchMangaParse(response)
-
-    override fun latestUpdatesRequest(page: Int): Request {
-        // KNS
-        val url = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("series")
-            .addQueryParameter("sort", "updated")
-            .addQueryParameter("page", page.toString())
-            .build()
-        // KNS
-        return GET(url, headers)
-    }
-
-    override fun latestUpdatesParse(response: Response): MangasPage = searchMangaParse(response)
-
-    override fun searchMangaRequest(page: Int, query: String, filters: FilterList): Request {
-        // KNS
-        val activeFilters = if (filters.isEmpty()) getFilterList() else filters
-        val builder = baseUrl.toHttpUrl().newBuilder()
-            .addPathSegment("series")
-            .addQueryParameter("page", page.toString())
-
-        if (query.isNotBlank()) {
-            builder.addQueryParameter("q", query)
-        }
-
-        activeFilters.forEach { filter ->
-            when (filter) {
-                is UriFilter -> filter.addToUrl(builder)
-                is GenreFilterGroup -> {
-                    val selected = filter.state.filter { it.state }.map { it.value }
-                    if (selected.isNotEmpty()) {
-                        builder.addQueryParameter("genres", selected.joinToString(","))
-                    }
-                }
-                is TagFilterGroup -> {
-                    val selected = filter.state.filter { it.state }.map { it.value }
-                    if (selected.isNotEmpty()) {
-                        builder.addQueryParameter("tags", selected.joinToString(","))
-                    }
-                }
-                else -> {}
-            }
-        }
-
-        val typeFilter = activeFilters.firstOrNull { it is DynamicTypeFilter } as? DynamicTypeFilter
-        val selectedType = typeFilter?.entries?.getOrNull(typeFilter.state)?.second.orEmpty()
-        if (selectedType.isBlank()) {
-            builder.addQueryParameter("type", "Manhwa,Manhua,Manga,Webtoon")
-        }
-
-        // KNS
-        return GET(builder.build(), headers)
-    }
-
-    override fun searchMangaParse(response: Response): MangasPage {
-        // KNS
-        val document = response.asDocument()
-        ensureDynamicFilters(document)
-
-        val mangas = document.select("a[href*=/series/], a[href^=/series/]")
-            .distinctBy { it.absUrl("href") }
-            .mapNotNull { a ->
-                val href = a.absUrl("href").ifBlank { return@mapNotNull null }
-                val title = a.attr("title").ifBlank {
-                    a.selectFirst("h1, h2, h3, h4, .title")?.text().orEmpty()
-                }.trim()
-                if (title.isBlank()) return@mapNotNull null
-
-                SManga.create().apply {
-                    setUrlWithoutDomain(href)
-                    this.title = title
-                    thumbnail_url = a.selectFirst("img")?.let { img ->
-                        img.absUrl("src")
-                            .ifBlank { img.absUrl("data-src") }
-                            .ifBlank { img.absUrl("data-lazy-src") }
-                    }
-                }
-            }
-
-        val hasNextPage = document.selectFirst("a[rel=next], a:matchesOwn((?i)next)") != null
-        // KNS
-        return MangasPage(mangas, hasNextPage)
-    }
-
-    override fun mangaDetailsParse(response: Response): SManga {
-        val document = response.asDocument()
-        return SManga.create().apply {
-            title = document.selectFirst("h1")?.text().orEmpty()
-            thumbnail_url = document.selectFirst("img")?.absUrl("src")
-            description = document.selectFirst("meta[name=description]")?.attr("content")
-                ?: document.selectFirst(".description, .summary, .content")?.text()
-            genre = document.select("a[href*=genre], a[href*=tag]")
-                .map { it.text().trim() }
-                .filter { it.isNotBlank() }
-                .distinct()
-                .joinToString(", ")
-        }
-    }
-
-    override fun chapterListParse(response: Response): List<SChapter> = emptyList()
-
-    override fun pageListParse(response: Response): List<Page> = emptyList()
-
-    override fun imageUrlParse(response: Response): String = ""
-
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            Filter.Header("Dynamic filters are fetched from /series payload"),
-            DynamicSortFilter(dynamicSorts),
-            DynamicStatusFilter(dynamicStatuses),
-            DynamicOriginFilter(dynamicOrigins),
-            DynamicTypeFilter(dynamicTypes),
-            GenreFilterGroup(dynamicGenres.ifEmpty { listOf("No genres loaded yet" to "") }),
-            TagFilterGroup(dynamicTags.ifEmpty { listOf("No tags loaded yet" to "") }),
+    override suspend fun getPopularManga(page: Int): MangasPage {
+        return getBrowsePage(
+            page = page,
+            forcedSort = POPULAR_SORT,
         )
     }
 
-    // KNS
-    private fun ensureDynamicFilters(document: Document) {
-        if (filterCacheLoaded) return
+    override suspend fun getLatestUpdates(page: Int): MangasPage {
+        return getBrowsePage(page = page)
+    }
 
-        val raw = buildString {
-            document.select("script").forEach {
-                append(it.data())
-                append('\n')
-                append(it.html())
-                append('\n')
-            }
+    override suspend fun getSearchMangaList(
+        page: Int,
+        query: String,
+        filters: FilterList,
+    ): MangasPage {
+        return getBrowsePage(
+            page = page,
+            query = query,
+            filters = filters,
+        )
+    }
+
+    private suspend fun getBrowsePage(
+        page: Int,
+        query: String = "",
+        filters: FilterList = FilterList(),
+        forcedSort: String? = null,
+    ): MangasPage {
+        val selectedTypes = filters
+            .firstInstanceOrNull<TypeFilter>()
+            ?.selectedValues
+            ?: DEFAULT_TYPES
+
+        if (selectedTypes.isEmpty()) {
+            return MangasPage(emptyList(), false)
         }
 
-        if (raw.isBlank()) return
+        val urlBuilder = "$baseUrl/series"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter("page", page.toString())
+            .addQueryParameter("type", selectedTypes.joinToString())
 
-        dynamicGenres = extractObjectNameSlugPairs(raw, "genres")
-        dynamicTags = extractObjectNameSlugPairs(raw, "tags")
+        query
+            .takeIf { it.isNotBlank() }
+            ?.let {
+                urlBuilder.addQueryParameter("q", it)
+            }
 
-        dynamicSorts = extractSortOptions(raw).ifEmpty { dynamicSorts }
-        dynamicStatuses = extractStringArray(raw, "A")
-            .map { it to it }
-            .ifEmpty { dynamicStatuses }
+        val selectedSort = forcedSort
+            ?: filters
+                .firstInstanceOrNull<SortFilter>()
+                ?.value
+                .orEmpty()
 
-        dynamicOrigins = extractOriginOptions(raw).ifEmpty { dynamicOrigins }
+        selectedSort
+            .takeIf { it.isNotEmpty() }
+            ?.let {
+                urlBuilder.addQueryParameter("sort", it)
+            }
 
-        dynamicTypes = extractStringArray(raw, "z")
-            .filter { it.contains("manhwa", true) || it.contains("manhua", true) || it.contains("manga", true) || it.contains("webtoon", true) }
-            .filterNot { it.contains("novel", true) }
+        filters
+            .firstInstanceOrNull<StatusFilter>()
+            ?.value
+            ?.takeIf { it.isNotEmpty() }
+            ?.let {
+                urlBuilder.addQueryParameter("status", it)
+            }
+
+        filters
+            .firstInstanceOrNull<OriginFilter>()
+            ?.value
+            ?.takeIf { it.isNotEmpty() }
+            ?.let {
+                urlBuilder.addQueryParameter("origin", it)
+            }
+
+        filters
+            .firstInstanceOrNull<OnSaleFilter>()
+            ?.takeIf { it.state }
+            ?.let {
+                urlBuilder.addQueryParameter("sale", "true")
+            }
+
+        filters
+            .firstInstanceOrNull<HasImagesFilter>()
+            ?.takeIf { it.state }
+            ?.let {
+                urlBuilder.addQueryParameter("hasImages", "true")
+            }
+
+        filters
+            .firstInstanceOrNull<MinimumChaptersFilter>()
+            ?.state
+            ?.trim()
+            ?.takeIf { it.toIntOrNull() != null }
+            ?.let {
+                urlBuilder.addQueryParameter("minChapters", it)
+            }
+
+        filters
+            .firstInstanceOrNull<MaximumChaptersFilter>()
+            ?.state
+            ?.trim()
+            ?.takeIf { it.toIntOrNull() != null }
+            ?.let {
+                urlBuilder.addQueryParameter("maxChapters", it)
+            }
+
+        filters
+            .firstInstanceOrNull<GenreFilter>()
+            ?.let { genreFilter ->
+                urlBuilder.addCsvParameter(
+                    GENRE_PARAMETER,
+                    genreFilter.includedValues,
+                )
+
+                urlBuilder.addCsvParameter(
+                    EXCLUDED_GENRE_PARAMETER,
+                    genreFilter.excludedValues,
+                )
+            }
+
+        filters
+            .firstInstanceOrNull<TagFilter>()
+            ?.let { tagFilter ->
+                urlBuilder.addCsvParameter(
+                    TAG_PARAMETER,
+                    tagFilter.includedValues,
+                )
+
+                urlBuilder.addCsvParameter(
+                    EXCLUDED_TAG_PARAMETER,
+                    tagFilter.excludedValues,
+                )
+            }
+
+        val pageData = client
+            .get(urlBuilder.build())
+            .extractNextJs<BrowsePageDto> { element ->
+                element is JsonObject &&
+                    "initialSeries" in element &&
+                    "initialHasMore" in element
+            }
+
+        return MangasPage(
+            mangas = pageData.initialSeries.map {
+                it.toSManga(baseUrl)
+            },
+            hasNextPage = pageData.initialHasMore,
+        )
+    }
+
+    override suspend fun fetchMangaUpdate(
+        manga: SManga,
+        chapters: List<SChapter>,
+        fetchDetails: Boolean,
+        fetchChapters: Boolean,
+    ): SMangaUpdate {
+        val (pageData, authorName) = getSeriesPage(manga.url)
+
+        return SMangaUpdate(
+            manga = pageData.series.toSManga(
+                baseUrl = baseUrl,
+                authorName = authorName,
+            ),
+            chapters = pageData.chapters
+                .map { chapter ->
+                    chapter.toSChapter(manga.url)
+                }
+                .sortedByDescending {
+                    it.chapter_number
+                },
+        )
+    }
+
+    private suspend fun getSeriesPage(
+        slug: String,
+    ): Pair<SeriesPageDto, String?> {
+        val document = client
+            .get("$baseUrl/series/comic/$slug")
+            .asJsoup()
+
+        val pageData = document.extractNextJs<SeriesPageDto> { element ->
+            element is JsonObject &&
+                "series" in element &&
+                "chapters" in element
+        }
+
+        val authorName = document
+            .getBookMetadata()
+            ?.author
+            ?.name
+
+        return pageData to authorName
+    }
+
+    override suspend fun getPageList(
+        chapter: SChapter,
+    ): List<Page> {
+        val document = client
+            .get(getChapterUrl(chapter))
+            .asJsoup()
+
+        return document
+            .select("img[alt^=\"Page\"][src]")
+            .mapNotNull { image ->
+                image.extractImageUrl()
+            }
             .distinct()
-            .map { it to it }
-            .let { list -> if (list.isEmpty()) dynamicTypes else listOf("All" to "") + list }
-
-        filterCacheLoaded = true
+            .mapIndexed { index, imageUrl ->
+                Page(
+                    index = index,
+                    imageUrl = imageUrl,
+                )
+            }
     }
 
-    private fun extractObjectNameSlugPairs(input: String, key: String): List<Pair<String, String>> {
-        val blockRegex = Regex(""""$key"\s*:\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
-        val block = blockRegex.find(input)?.groupValues?.get(1).orEmpty()
-        if (block.isBlank()) return emptyList()
-
-        val itemRegex = Regex("""\{[^{}]*?"name"\s*:\s*"([^"]+)"[^{}]*?"slug"\s*:\s*"([^"]+)"[^{}]*?}""")
-        return itemRegex.findAll(block)
-            .map { it.groupValues[1].trim() to it.groupValues[2].trim() }
-            .filter { it.first.isNotBlank() && it.second.isNotBlank() }
-            .distinctBy { it.second.lowercase() }
-            .toList()
+    override fun getMangaUrl(manga: SManga): String {
+        return "$baseUrl/series/comic/${manga.url}"
     }
 
-    private fun extractStringArray(input: String, variableName: String): List<String> {
-        val regex = Regex("""\b$variableName\s*=\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
-        val body = regex.find(input)?.groupValues?.get(1).orEmpty()
-        if (body.isBlank()) return emptyList()
+    override fun getChapterUrl(chapter: SChapter): String {
+        val slug = chapter.url.substringBeforeLast("/")
+        val chapterNumber = chapter.url.substringAfterLast("/")
 
-        return Regex(""""([^"]+)"""").findAll(body)
-            .map { it.groupValues[1].trim() }
-            .filter { it.isNotBlank() }
-            .toList()
+        return "$baseUrl/series/comic/$slug/chapter/$chapterNumber"
     }
 
-    private fun extractOriginOptions(input: String): List<Pair<String, String>> {
-        val blockRegex = Regex("""B\s*=\s*\[(.*?)]""", setOf(RegexOption.DOT_MATCHES_ALL))
-        val block = blockRegex.find(input)?.groupValues?.get(1).orEmpty()
-        if (block.isBlank()) return emptyList()
+    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+        if (url.host != baseUrl.toHttpUrl().host) {
+            return null
+        }
 
-        val itemRegex = Regex("""\{[^{}]*?value:\s*"([^"]*)"[^{}]*?label:\s*"([^"]+)"[^{}]*?}""")
-        val parsed = itemRegex.findAll(block)
-            .map { it.groupValues[2].trim() to it.groupValues[1].trim() }
-            .filter { it.first.isNotBlank() }
-            .toList()
+        val slug = url.extractSeriesSlug()
+            ?: return null
 
-        return if (parsed.any { it.second.isEmpty() }) parsed else listOf("All Origins" to "") + parsed
+        val (pageData, authorName) = getSeriesPage(slug)
+
+        return pageData.series.toSManga(
+            baseUrl = baseUrl,
+            authorName = authorName,
+        )
     }
 
-    private fun extractSortOptions(input: String): List<Pair<String, String>> {
-        val itemRegex = Regex("""value:\s*"([^"]+)"\s*,\s*label:\s*"([^"]+)"""")
-        val parsed = itemRegex.findAll(input)
-            .map { it.groupValues[2].trim() to it.groupValues[1].trim() }
-            .filter { it.first.isNotBlank() && it.second.isNotBlank() }
-            .distinctBy { it.second }
-            .toList()
+    override suspend fun fetchFilterData(): JsonElement {
+        val url = "$baseUrl/series"
+            .toHttpUrl()
+            .newBuilder()
+            .addQueryParameter(
+                "type",
+                DEFAULT_TYPES.joinToString(),
+            )
+            .build()
 
-        return parsed
+        return client
+            .get(url)
+            .extractNextJs<JsonElement> { element ->
+                element is JsonObject &&
+                    "genres" in element &&
+                    "tags" in element
+            }
     }
 
-    private fun Response.asDocument(): Document = Jsoup.parse(body.string(), request.url.toString())
-    // KNS
+    override fun getFilterList(
+        data: JsonElement?,
+    ): FilterList {
+        val filterData = data?.let { element ->
+            runCatching {
+                element.parseAs<FilterDataDto>()
+            }.getOrNull()
+        }
+
+        return FilterList(
+            SortFilter(),
+            TypeFilter(),
+            StatusFilter(),
+            OriginFilter(),
+            OnSaleFilter(),
+            HasImagesFilter(),
+            MinimumChaptersFilter(),
+            MaximumChaptersFilter(),
+            GenreFilter(filterData?.genres.orEmpty()),
+            TagFilter(filterData?.tags.orEmpty()),
+        )
+    }
+
+    private fun Document.getBookMetadata(): BookDto? {
+        return select("script[type=application/ld+json]")
+            .mapNotNull { script ->
+                runCatching {
+                    script.data().parseAs<BookDto>()
+                }.getOrNull()
+            }
+            .firstOrNull {
+                it.type == BOOK_SCHEMA_TYPE
+            }
+    }
+
+    private fun Element.extractImageUrl(): String? {
+        val source = absUrl("src")
+            .ifEmpty {
+                attr("src")
+            }
+            .takeIf {
+                it.isNotEmpty()
+            }
+            ?: return null
+
+        val parsedSource = runCatching {
+            source.toHttpUrl()
+        }.getOrNull()
+
+        val unwrappedSource = if (
+            parsedSource?.encodedPath == NEXT_IMAGE_PATH
+        ) {
+            parsedSource.queryParameter(NEXT_IMAGE_URL_PARAMETER)
+                ?: source
+        } else {
+            source
+        }
+
+        return resolveUrl(unwrappedSource)
+    }
+
+    private fun HttpUrl.extractSeriesSlug(): String? {
+        val comicIndex = pathSegments.indexOf(COMIC_PATH_SEGMENT)
+
+        if (
+            comicIndex <= 0 ||
+            pathSegments.getOrNull(comicIndex - 1) != SERIES_PATH_SEGMENT
+        ) {
+            return null
+        }
+
+        return pathSegments
+            .getOrNull(comicIndex + 1)
+            ?.takeIf {
+                it.isNotEmpty()
+            }
+    }
+
+    private fun HttpUrl.Builder.addCsvParameter(
+        name: String,
+        values: List<String>,
+    ): HttpUrl.Builder {
+        if (values.isNotEmpty()) {
+            addQueryParameter(
+                name,
+                values.joinToString(),
+            )
+        }
+
+        return this
+    }
+
+    private fun resolveUrl(url: String): String {
+        return baseUrl
+            .toHttpUrl()
+            .resolve(url)
+            ?.toString()
+            ?: url
+    }
+
+    companion object {
+        private val DEFAULT_TYPES = listOf(
+            "Manhwa",
+            "Manhua",
+            "Manga",
+            "Webtoon",
+        )
+
+        private const val POPULAR_SORT = "popular"
+
+        private const val GENRE_PARAMETER = "genre"
+        private const val TAG_PARAMETER = "tag"
+
+        /*
+         * Positive genre/tag query names are exposed by the captured pages.
+         * Keep these constants separate in case DesireScans renames its
+         * exclusion parameters.
+         */
+        private const val EXCLUDED_GENRE_PARAMETER = "excludeGenre"
+        private const val EXCLUDED_TAG_PARAMETER = "excludeTag"
+
+        private const val SERIES_PATH_SEGMENT = "series"
+        private const val COMIC_PATH_SEGMENT = "comic"
+
+        private const val BOOK_SCHEMA_TYPE = "Book"
+
+        private const val NEXT_IMAGE_PATH = "/_next/image"
+        private const val NEXT_IMAGE_URL_PARAMETER = "url"
+    }
 }

@@ -14,4 +14,8 @@ keiyoushi {
         lang = "en"
         baseUrl = "https://desirescans.com"
     }
+
+    deeplink {
+        path("/series/comic/..*")
+    }
 }

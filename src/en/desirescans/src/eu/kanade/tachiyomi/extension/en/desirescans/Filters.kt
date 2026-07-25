@@ -1,78 +1,146 @@
 package eu.kanade.tachiyomi.extension.en.desirescans
 
 import eu.kanade.tachiyomi.source.model.Filter
-import okhttp3.HttpUrl
 
-internal interface UriFilter {
-    fun addToUrl(builder: HttpUrl.Builder)
-}
+internal class SortFilter :
+    Filter.Select<String>(
+        "Sort",
+        SORT_OPTIONS.map { it.first }.toTypedArray(),
+    ) {
 
-internal open class DynamicUriSelectFilter(
-    name: String,
-    private val param: String,
-    entries: List<Pair<String, String>>,
-    private val firstIsUnspecified: Boolean = true,
-    state: Int = 0,
-) : Filter.Select<String>(
-    name,
-    entries.map { it.first }.toTypedArray(),
-    state.coerceIn(0, (entries.size - 1).coerceAtLeast(0)),
-),
-    UriFilter {
-    // KNS
-    val entries: List<Pair<String, String>> = entries.ifEmpty { listOf("Any" to "") }
-    // KNS
+    val value: String
+        get() = SORT_OPTIONS[state].second
 
-    override fun addToUrl(builder: HttpUrl.Builder) {
-        // KNS
-        val selected = entries[state].second
-        if ((state != 0 || !firstIsUnspecified) && selected.isNotBlank()) {
-            builder.addQueryParameter(param, selected)
-        }
-        // KNS
+    companion object {
+        private val SORT_OPTIONS = arrayOf(
+            "Recently Updated" to "",
+            "Most Bookmarked" to "popular",
+            "Most Viewed" to "views",
+            "Longest" to "chapters",
+            "Trending" to "trending",
+            "Top Rated" to "rating",
+            "Newest" to "newest",
+        )
     }
 }
 
-internal class DynamicSortFilter(entries: List<Pair<String, String>>) :
-    DynamicUriSelectFilter(
-        name = "Sort",
-        param = "sort",
-        entries = entries,
-        firstIsUnspecified = false,
-    )
+internal class TypeFilter :
+    Filter.Group<TypeCheckBox>(
+        "Types",
+        TYPE_OPTIONS.map { (name, value) ->
+            TypeCheckBox(name, value)
+        },
+    ) {
 
-internal class DynamicStatusFilter(entries: List<Pair<String, String>>) :
-    DynamicUriSelectFilter(
-        name = "Status",
-        param = "status",
-        entries = entries,
-    )
+    val selectedValues: List<String>
+        get() = state
+            .filter { it.state }
+            .map { it.value }
 
-internal class DynamicOriginFilter(entries: List<Pair<String, String>>) :
-    DynamicUriSelectFilter(
-        name = "Origin",
-        param = "origin",
-        entries = entries,
-    )
+    companion object {
+        private val TYPE_OPTIONS = arrayOf(
+            "Manhwa" to "Manhwa",
+            "Manhua" to "Manhua",
+            "Manga" to "Manga",
+            "Webtoon" to "Webtoon",
+        )
+    }
+}
 
-internal class DynamicTypeFilter(entries: List<Pair<String, String>>) :
-    DynamicUriSelectFilter(
-        name = "Type",
-        param = "type",
-        entries = entries,
-    )
+internal class TypeCheckBox(
+    name: String,
+    val value: String,
+) : Filter.CheckBox(name, true)
 
-internal class GenreFilter(name: String, val value: String) : Filter.CheckBox(name, false)
-internal class TagFilter(name: String, val value: String) : Filter.CheckBox(name, false)
+internal class StatusFilter :
+    Filter.Select<String>(
+        "Status",
+        STATUS_OPTIONS.map { it.first }.toTypedArray(),
+    ) {
 
-internal class GenreFilterGroup(entries: List<Pair<String, String>>) :
-    Filter.Group<GenreFilter>(
-        "Genres",
-        entries.map { GenreFilter(it.first, it.second) },
-    )
+    val value: String
+        get() = STATUS_OPTIONS[state].second
 
-internal class TagFilterGroup(entries: List<Pair<String, String>>) :
-    Filter.Group<TagFilter>(
-        "Tags",
-        entries.map { TagFilter(it.first, it.second) },
-    )
+    companion object {
+        private val STATUS_OPTIONS = arrayOf(
+            "All" to "",
+            "Ongoing" to "ONGOING",
+            "Completed" to "COMPLETED",
+            "Hiatus" to "HIATUS",
+            "Dropped" to "DROPPED",
+            "Discontinued" to "DISCONTINUED",
+            "Upcoming" to "UPCOMING",
+        )
+    }
+}
+
+internal class OriginFilter :
+    Filter.Select<String>(
+        "Origin",
+        ORIGIN_OPTIONS.map { it.first }.toTypedArray(),
+    ) {
+
+    val value: String
+        get() = ORIGIN_OPTIONS[state].second
+
+    companion object {
+        private val ORIGIN_OPTIONS = arrayOf(
+            "All Origins" to "",
+            "Korean" to "KOREAN",
+            "Japanese" to "JAPANESE",
+            "Chinese" to "CHINESE",
+            "Other" to "OTHER",
+        )
+    }
+}
+
+internal class OnSaleFilter : Filter.CheckBox("On Sale")
+
+internal class HasImagesFilter : Filter.CheckBox("Has Images")
+
+internal class MinimumChaptersFilter : Filter.Text("Minimum chapters")
+
+internal class MaximumChaptersFilter : Filter.Text("Maximum chapters")
+
+internal class GenreFilter(
+    options: List<OptionDto>,
+) : Filter.Group<UriPartTriState>(
+    "Genres",
+    options.map { option ->
+        UriPartTriState(option.name, option.slug)
+    },
+) {
+    val includedValues: List<String>
+        get() = state
+            .filter { it.state == Filter.TriState.STATE_INCLUDE }
+            .map { it.value }
+
+    val excludedValues: List<String>
+        get() = state
+            .filter { it.state == Filter.TriState.STATE_EXCLUDE }
+            .map { it.value }
+}
+
+internal class TagFilter(
+    options: List<OptionDto>,
+) : Filter.Group<UriPartTriState>(
+    "Tags",
+    options.map { option ->
+        UriPartTriState(option.name, option.slug)
+    },
+) {
+    val includedValues: List<String>
+        get() = state
+            .filter { it.state == Filter.TriState.STATE_INCLUDE }
+            .map { it.value }
+
+    val excludedValues: List<String>
+        get() = state
+            .filter { it.state == Filter.TriState.STATE_EXCLUDE }
+            .map { it.value }
+}
+
+internal class UriPartTriState(
+    name: String,
+    val value: String,
+) : Filter.TriState(name)

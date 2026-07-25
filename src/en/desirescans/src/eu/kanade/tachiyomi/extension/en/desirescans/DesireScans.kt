@@ -13,10 +13,12 @@ import keiyoushi.source.KeiSource
 import keiyoushi.utils.extractNextJs
 import keiyoushi.utils.firstInstanceOrNull
 import keiyoushi.utils.parseAs
+import keiyoushi.utils.runWebView
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 
@@ -25,12 +27,16 @@ abstract class DesireScans : KeiSource() {
 
     override val supportsFilterFetching = true
 
-    override suspend fun getPopularManga(page: Int): MangasPage = getBrowsePage(
+    override suspend fun getPopularManga(
+        page: Int,
+    ): MangasPage = getBrowsePage(
         page = page,
         forcedSort = POPULAR_SORT,
     )
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage = getBrowsePage(page = page)
+    override suspend fun getLatestUpdates(
+        page: Int,
+    ): MangasPage = getBrowsePage(page = page)
 
     override suspend fun getSearchMangaList(
         page: Int,
@@ -54,19 +60,31 @@ abstract class DesireScans : KeiSource() {
             ?: DEFAULT_TYPES
 
         if (selectedTypes.isEmpty()) {
-            return MangasPage(emptyList(), false)
+            return MangasPage(
+                mangas = emptyList(),
+                hasNextPage = false,
+            )
         }
 
         val urlBuilder = "$baseUrl/series"
             .toHttpUrl()
             .newBuilder()
-            .addQueryParameter("page", page.toString())
-            .addQueryParameter("type", selectedTypes.joinToString())
+            .addQueryParameter(
+                "page",
+                page.toString(),
+            )
+            .addQueryParameter(
+                "type",
+                selectedTypes.joinToString(),
+            )
 
         query
             .takeIf { it.isNotBlank() }
             ?.let {
-                urlBuilder.addQueryParameter("q", it)
+                urlBuilder.addQueryParameter(
+                    "q",
+                    it,
+                )
             }
 
         val selectedSort = forcedSort
@@ -78,7 +96,10 @@ abstract class DesireScans : KeiSource() {
         selectedSort
             .takeIf { it.isNotEmpty() }
             ?.let {
-                urlBuilder.addQueryParameter("sort", it)
+                urlBuilder.addQueryParameter(
+                    "sort",
+                    it,
+                )
             }
 
         filters
@@ -86,7 +107,10 @@ abstract class DesireScans : KeiSource() {
             ?.value
             ?.takeIf { it.isNotEmpty() }
             ?.let {
-                urlBuilder.addQueryParameter("status", it)
+                urlBuilder.addQueryParameter(
+                    "status",
+                    it,
+                )
             }
 
         filters
@@ -94,39 +118,58 @@ abstract class DesireScans : KeiSource() {
             ?.value
             ?.takeIf { it.isNotEmpty() }
             ?.let {
-                urlBuilder.addQueryParameter("origin", it)
+                urlBuilder.addQueryParameter(
+                    "origin",
+                    it,
+                )
             }
 
         filters
             .firstInstanceOrNull<OnSaleFilter>()
             ?.takeIf { it.state }
             ?.let {
-                urlBuilder.addQueryParameter("sale", "true")
+                urlBuilder.addQueryParameter(
+                    "sale",
+                    "true",
+                )
             }
 
         filters
             .firstInstanceOrNull<HasImagesFilter>()
             ?.takeIf { it.state }
             ?.let {
-                urlBuilder.addQueryParameter("hasImages", "true")
+                urlBuilder.addQueryParameter(
+                    "hasImages",
+                    "true",
+                )
             }
 
         filters
             .firstInstanceOrNull<MinimumChaptersFilter>()
             ?.state
             ?.trim()
-            ?.takeIf { it.toIntOrNull() != null }
+            ?.takeIf {
+                it.toIntOrNull() != null
+            }
             ?.let {
-                urlBuilder.addQueryParameter("minChapters", it)
+                urlBuilder.addQueryParameter(
+                    "minChapters",
+                    it,
+                )
             }
 
         filters
             .firstInstanceOrNull<MaximumChaptersFilter>()
             ?.state
             ?.trim()
-            ?.takeIf { it.toIntOrNull() != null }
+            ?.takeIf {
+                it.toIntOrNull() != null
+            }
             ?.let {
-                urlBuilder.addQueryParameter("maxChapters", it)
+                urlBuilder.addQueryParameter(
+                    "maxChapters",
+                    it,
+                )
             }
 
         filters
@@ -164,7 +207,9 @@ abstract class DesireScans : KeiSource() {
                     "initialSeries" in element &&
                     "initialHasMore" in element
             }
-            ?: error("Failed to parse DesireScans browse page")
+            ?: error(
+                "Failed to parse DesireScans browse page",
+            )
 
         return MangasPage(
             mangas = pageData.initialSeries.map {
@@ -180,7 +225,9 @@ abstract class DesireScans : KeiSource() {
         fetchDetails: Boolean,
         fetchChapters: Boolean,
     ): SMangaUpdate {
-        val (pageData, authorName) = getSeriesPage(manga.url)
+        val (pageData, authorName) = getSeriesPage(
+            manga.url,
+        )
 
         return SMangaUpdate(
             manga = pageData.series.toSManga(
@@ -210,7 +257,9 @@ abstract class DesireScans : KeiSource() {
                     "series" in element &&
                     "chapters" in element
             }
-            ?: error("Failed to parse DesireScans series page")
+            ?: error(
+                "Failed to parse DesireScans series page",
+            )
 
         val authorName = document
             .getBookMetadata()
@@ -223,34 +272,77 @@ abstract class DesireScans : KeiSource() {
     override suspend fun getPageList(
         chapter: SChapter,
     ): List<Page> {
-        val document = client
-            .get(getChapterUrl(chapter))
-            .asJsoup()
+        val chapterUrl = getChapterUrl(chapter)
 
-        return document
-            .select("img[alt^=\"Page\"][src]")
-            .mapNotNull { image ->
-                image.extractImageUrl()
+        val initialPages = client
+            .get(chapterUrl)
+            .asJsoup()
+            .toPageList()
+
+        if (initialPages.isNotEmpty()) {
+            return initialPages
+        }
+
+        /*
+         * DesireScans renders the reader images through client-side
+         * JavaScript. When they are absent from the initial OkHttp
+         * response, render the chapter in a WebView and parse the
+         * resulting DOM.
+         */
+        val renderedHtml = runWebView<String> {
+            onPageFinished { _ ->
+                evaluateJs(
+                    "document.documentElement.outerHTML",
+                ) { html ->
+                    resolve(html)
+                }
             }
-            .distinct()
-            .mapIndexed { index, imageUrl ->
-                Page(
-                    index = index,
-                    imageUrl = imageUrl,
-                )
-            }
+
+            loadUrl(chapterUrl)
+        }
+
+        return Jsoup
+            .parse(
+                renderedHtml,
+                chapterUrl,
+            )
+            .toPageList()
     }
 
-    override fun getMangaUrl(manga: SManga): String = "$baseUrl/series/comic/${manga.url}"
+    private fun Document.toPageList(): List<Page> = select(
+        "div[data-page] img[src], " +
+            "img[alt^=\"Page\"][src]",
+    )
+        .mapNotNull { image ->
+            image.extractImageUrl()
+        }
+        .distinct()
+        .mapIndexed { index, imageUrl ->
+            Page(
+                index = index,
+                imageUrl = imageUrl,
+            )
+        }
 
-    override fun getChapterUrl(chapter: SChapter): String {
-        val slug = chapter.url.substringBeforeLast("/")
-        val chapterNumber = chapter.url.substringAfterLast("/")
+    override fun getMangaUrl(
+        manga: SManga,
+    ): String = "$baseUrl/series/comic/${manga.url}"
+
+    override fun getChapterUrl(
+        chapter: SChapter,
+    ): String {
+        val slug = chapter.url
+            .substringBeforeLast("/")
+
+        val chapterNumber = chapter.url
+            .substringAfterLast("/")
 
         return "$baseUrl/series/comic/$slug/chapter/$chapterNumber"
     }
 
-    override suspend fun getMangaByUrl(url: HttpUrl): SManga? {
+    override suspend fun getMangaByUrl(
+        url: HttpUrl,
+    ): SManga? {
         if (url.host != baseUrl.toHttpUrl().host) {
             return null
         }
@@ -283,7 +375,9 @@ abstract class DesireScans : KeiSource() {
                     "genres" in element &&
                     "tags" in element
             }
-            ?: error("Failed to parse DesireScans filter data")
+            ?: error(
+                "Failed to parse DesireScans filter data",
+            )
     }
 
     override fun getFilterList(
@@ -304,15 +398,23 @@ abstract class DesireScans : KeiSource() {
             HasImagesFilter(),
             MinimumChaptersFilter(),
             MaximumChaptersFilter(),
-            GenreFilter(filterData?.genres.orEmpty()),
-            TagFilter(filterData?.tags.orEmpty()),
+            GenreFilter(
+                filterData?.genres.orEmpty(),
+            ),
+            TagFilter(
+                filterData?.tags.orEmpty(),
+            ),
         )
     }
 
-    private fun Document.getBookMetadata(): BookDto? = select("script[type=application/ld+json]")
+    private fun Document.getBookMetadata(): BookDto? = select(
+        "script[type=application/ld+json]",
+    )
         .mapNotNull { script ->
             runCatching {
-                script.data().parseAs<BookDto>()
+                script
+                    .data()
+                    .parseAs<BookDto>()
             }.getOrNull()
         }
         .firstOrNull {
@@ -323,6 +425,12 @@ abstract class DesireScans : KeiSource() {
         val source = absUrl("src")
             .ifEmpty {
                 attr("src")
+            }
+            .ifEmpty {
+                absUrl("data-src")
+            }
+            .ifEmpty {
+                attr("data-src")
             }
             .takeIf {
                 it.isNotEmpty()
@@ -336,8 +444,9 @@ abstract class DesireScans : KeiSource() {
         val unwrappedSource = if (
             parsedSource?.encodedPath == NEXT_IMAGE_PATH
         ) {
-            parsedSource.queryParameter(NEXT_IMAGE_URL_PARAMETER)
-                ?: source
+            parsedSource.queryParameter(
+                NEXT_IMAGE_URL_PARAMETER,
+            ) ?: source
         } else {
             source
         }
@@ -346,11 +455,14 @@ abstract class DesireScans : KeiSource() {
     }
 
     private fun HttpUrl.extractSeriesSlug(): String? {
-        val comicIndex = pathSegments.indexOf(COMIC_PATH_SEGMENT)
+        val comicIndex = pathSegments.indexOf(
+            COMIC_PATH_SEGMENT,
+        )
 
         if (
             comicIndex <= 0 ||
-            pathSegments.getOrNull(comicIndex - 1) != SERIES_PATH_SEGMENT
+            pathSegments.getOrNull(comicIndex - 1) !=
+            SERIES_PATH_SEGMENT
         ) {
             return null
         }
@@ -376,7 +488,9 @@ abstract class DesireScans : KeiSource() {
         return this
     }
 
-    private fun resolveUrl(url: String): String = baseUrl
+    private fun resolveUrl(
+        url: String,
+    ): String = baseUrl
         .toHttpUrl()
         .resolve(url)
         ?.toString()
@@ -390,20 +504,34 @@ abstract class DesireScans : KeiSource() {
             "Webtoon",
         )
 
-        private const val POPULAR_SORT = "popular"
+        private const val POPULAR_SORT =
+            "popular"
 
-        private const val GENRE_PARAMETER = "genre"
-        private const val TAG_PARAMETER = "tag"
+        private const val GENRE_PARAMETER =
+            "genre"
 
-        private const val EXCLUDED_GENRE_PARAMETER = "excludeGenre"
-        private const val EXCLUDED_TAG_PARAMETER = "excludeTag"
+        private const val TAG_PARAMETER =
+            "tag"
 
-        private const val SERIES_PATH_SEGMENT = "series"
-        private const val COMIC_PATH_SEGMENT = "comic"
+        private const val EXCLUDED_GENRE_PARAMETER =
+            "excludeGenre"
 
-        private const val BOOK_SCHEMA_TYPE = "Book"
+        private const val EXCLUDED_TAG_PARAMETER =
+            "excludeTag"
 
-        private const val NEXT_IMAGE_PATH = "/_next/image"
-        private const val NEXT_IMAGE_URL_PARAMETER = "url"
+        private const val SERIES_PATH_SEGMENT =
+            "series"
+
+        private const val COMIC_PATH_SEGMENT =
+            "comic"
+
+        private const val BOOK_SCHEMA_TYPE =
+            "Book"
+
+        private const val NEXT_IMAGE_PATH =
+            "/_next/image"
+
+        private const val NEXT_IMAGE_URL_PARAMETER =
+            "url"
     }
 }

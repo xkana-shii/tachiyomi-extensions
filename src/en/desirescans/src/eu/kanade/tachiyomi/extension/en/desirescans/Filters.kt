@@ -3,13 +3,14 @@ package eu.kanade.tachiyomi.extension.en.desirescans
 import eu.kanade.tachiyomi.source.model.Filter
 
 internal class SortFilter :
-    Filter.Select<String>(
+    Filter.Sort(
         "Sort",
         SORT_OPTIONS.map { it.first }.toTypedArray(),
+        Filter.Sort.Selection(0, false),
     ) {
 
     val value: String
-        get() = SORT_OPTIONS[state].second
+        get() = SORT_OPTIONS[state?.index ?: 0].second
 
     companion object {
         private val SORT_OPTIONS = arrayOf(
@@ -107,18 +108,30 @@ internal class GenreFilter(
 ) : Filter.Group<UriPartTriState>(
     "Genres",
     options.map { option ->
-        UriPartTriState(option.name, option.slug)
+        UriPartTriState(
+            name = option.name,
+            value = option.slug,
+        )
     },
 ) {
+
     val includedValues: List<String>
         get() = state
-            .filter { it.state == Filter.TriState.STATE_INCLUDE }
-            .map { it.value }
+            .filter {
+                it.state == Filter.TriState.STATE_INCLUDE
+            }
+            .map {
+                it.value
+            }
 
     val excludedValues: List<String>
         get() = state
-            .filter { it.state == Filter.TriState.STATE_EXCLUDE }
-            .map { it.value }
+            .filter {
+                it.state == Filter.TriState.STATE_EXCLUDE
+            }
+            .map {
+                it.value
+            }
 }
 
 internal class TagFilter(
@@ -126,18 +139,30 @@ internal class TagFilter(
 ) : Filter.Group<UriPartTriState>(
     "Tags",
     options.map { option ->
-        UriPartTriState(option.name, option.slug)
+        UriPartTriState(
+            name = option.name,
+            value = option.slug,
+        )
     },
 ) {
+
     val includedValues: List<String>
         get() = state
-            .filter { it.state == Filter.TriState.STATE_INCLUDE }
-            .map { it.value }
+            .filter {
+                it.state == Filter.TriState.STATE_INCLUDE
+            }
+            .map {
+                it.value
+            }
 
     val excludedValues: List<String>
         get() = state
-            .filter { it.state == Filter.TriState.STATE_EXCLUDE }
-            .map { it.value }
+            .filter {
+                it.state == Filter.TriState.STATE_EXCLUDE
+            }
+            .map {
+                it.value
+            }
 }
 
 internal class UriPartTriState(

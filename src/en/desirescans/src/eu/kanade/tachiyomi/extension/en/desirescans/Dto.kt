@@ -165,32 +165,26 @@ internal class AuthorDto(
     val name: String? = null,
 )
 
-private fun String.toAbsoluteUrl(baseUrl: String): String {
-    return baseUrl
-        .toHttpUrl()
-        .resolve(this)
-        ?.toString()
-        ?: this
-}
+private fun String.toAbsoluteUrl(baseUrl: String): String = baseUrl
+    .toHttpUrl()
+    .resolve(this)
+    ?.toString()
+    ?: this
 
-private fun String.toDisplayName(): String {
-    return lowercase()
-        .split('_')
-        .joinToString(" ") { word ->
-            word.replaceFirstChar { it.titlecase() }
-        }
-}
-
-private fun String.toMangaStatus(): Int {
-    return when (uppercase()) {
-        "ONGOING" -> SManga.ONGOING
-        "COMPLETED" -> SManga.COMPLETED
-        "HIATUS" -> SManga.ON_HIATUS
-        "DROPPED",
-        "DISCONTINUED",
-        "CANCELLED",
-        "CANCELED",
-            -> SManga.CANCELLED
-        else -> SManga.UNKNOWN
+private fun String.toDisplayName(): String = lowercase()
+    .split('_')
+    .joinToString(" ") { word ->
+        word.replaceFirstChar { it.titlecase() }
     }
+
+private fun String.toMangaStatus(): Int = when (uppercase()) {
+    "ONGOING" -> SManga.ONGOING
+    "COMPLETED" -> SManga.COMPLETED
+    "HIATUS" -> SManga.ON_HIATUS
+    "DROPPED",
+    "DISCONTINUED",
+    "CANCELLED",
+    "CANCELED",
+    -> SManga.CANCELLED
+    else -> SManga.UNKNOWN
 }

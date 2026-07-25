@@ -25,28 +25,22 @@ abstract class DesireScans : KeiSource() {
 
     override val supportsFilterFetching = true
 
-    override suspend fun getPopularManga(page: Int): MangasPage {
-        return getBrowsePage(
-            page = page,
-            forcedSort = POPULAR_SORT,
-        )
-    }
+    override suspend fun getPopularManga(page: Int): MangasPage = getBrowsePage(
+        page = page,
+        forcedSort = POPULAR_SORT,
+    )
 
-    override suspend fun getLatestUpdates(page: Int): MangasPage {
-        return getBrowsePage(page = page)
-    }
+    override suspend fun getLatestUpdates(page: Int): MangasPage = getBrowsePage(page = page)
 
     override suspend fun getSearchMangaList(
         page: Int,
         query: String,
         filters: FilterList,
-    ): MangasPage {
-        return getBrowsePage(
-            page = page,
-            query = query,
-            filters = filters,
-        )
-    }
+    ): MangasPage = getBrowsePage(
+        page = page,
+        query = query,
+        filters = filters,
+    )
 
     private suspend fun getBrowsePage(
         page: Int,
@@ -170,6 +164,7 @@ abstract class DesireScans : KeiSource() {
                     "initialSeries" in element &&
                     "initialHasMore" in element
             }
+            ?: error("Failed to parse DesireScans browse page")
 
         return MangasPage(
             mangas = pageData.initialSeries.map {
@@ -209,11 +204,13 @@ abstract class DesireScans : KeiSource() {
             .get("$baseUrl/series/comic/$slug")
             .asJsoup()
 
-        val pageData = document.extractNextJs<SeriesPageDto> { element ->
-            element is JsonObject &&
-                "series" in element &&
-                "chapters" in element
-        }
+        val pageData = document
+            .extractNextJs<SeriesPageDto> { element ->
+                element is JsonObject &&
+                    "series" in element &&
+                    "chapters" in element
+            }
+            ?: error("Failed to parse DesireScans series page")
 
         val authorName = document
             .getBookMetadata()
@@ -244,9 +241,7 @@ abstract class DesireScans : KeiSource() {
             }
     }
 
-    override fun getMangaUrl(manga: SManga): String {
-        return "$baseUrl/series/comic/${manga.url}"
-    }
+    override fun getMangaUrl(manga: SManga): String = "$baseUrl/series/comic/${manga.url}"
 
     override fun getChapterUrl(chapter: SChapter): String {
         val slug = chapter.url.substringBeforeLast("/")
@@ -288,6 +283,7 @@ abstract class DesireScans : KeiSource() {
                     "genres" in element &&
                     "tags" in element
             }
+            ?: error("Failed to parse DesireScans filter data")
     }
 
     override fun getFilterList(
@@ -313,17 +309,15 @@ abstract class DesireScans : KeiSource() {
         )
     }
 
-    private fun Document.getBookMetadata(): BookDto? {
-        return select("script[type=application/ld+json]")
-            .mapNotNull { script ->
-                runCatching {
-                    script.data().parseAs<BookDto>()
-                }.getOrNull()
-            }
-            .firstOrNull {
-                it.type == BOOK_SCHEMA_TYPE
-            }
-    }
+    private fun Document.getBookMetadata(): BookDto? = select("script[type=application/ld+json]")
+        .mapNotNull { script ->
+            runCatching {
+                script.data().parseAs<BookDto>()
+            }.getOrNull()
+        }
+        .firstOrNull {
+            it.type == BOOK_SCHEMA_TYPE
+        }
 
     private fun Element.extractImageUrl(): String? {
         val source = absUrl("src")
@@ -382,13 +376,11 @@ abstract class DesireScans : KeiSource() {
         return this
     }
 
-    private fun resolveUrl(url: String): String {
-        return baseUrl
-            .toHttpUrl()
-            .resolve(url)
-            ?.toString()
-            ?: url
-    }
+    private fun resolveUrl(url: String): String = baseUrl
+        .toHttpUrl()
+        .resolve(url)
+        ?.toString()
+        ?: url
 
     companion object {
         private val DEFAULT_TYPES = listOf(
@@ -403,11 +395,6 @@ abstract class DesireScans : KeiSource() {
         private const val GENRE_PARAMETER = "genre"
         private const val TAG_PARAMETER = "tag"
 
-        /*
-         * Positive genre/tag query names are exposed by the captured pages.
-         * Keep these constants separate in case DesireScans renames its
-         * exclusion parameters.
-         */
         private const val EXCLUDED_GENRE_PARAMETER = "excludeGenre"
         private const val EXCLUDED_TAG_PARAMETER = "excludeTag"
 

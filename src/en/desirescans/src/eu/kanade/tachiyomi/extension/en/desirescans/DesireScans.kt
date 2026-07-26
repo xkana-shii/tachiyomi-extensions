@@ -1,5 +1,7 @@
 package eu.kanade.tachiyomi.extension.en.desirescans
 
+import android.os.Handler
+import android.os.Looper
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.Page
@@ -18,6 +20,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -27,26 +30,48 @@ abstract class DesireScans : KeiSource() {
 
     override val supportsFilterFetching = true
 
+    override fun OkHttpClient.Builder.configureClient(): OkHttpClient.Builder {
+        return addInterceptor { chain ->
+            val originalRequest = chain.request()
+
+            val request = if (originalRequest.url.host == MEDIA_HOST) {
+                originalRequest.newBuilder()
+                    .header("Referer", "$baseUrl/")
+                    .build()
+            } else {
+                originalRequest
+            }
+
+            chain.proceed(request)
+        }
+    }
+
     override suspend fun getPopularManga(
         page: Int,
-    ): MangasPage = getBrowsePage(
-        page = page,
-        forcedSort = POPULAR_SORT,
-    )
+    ): MangasPage {
+        return getBrowsePage(
+            page = page,
+            forcedSort = POPULAR_SORT,
+        )
+    }
 
     override suspend fun getLatestUpdates(
         page: Int,
-    ): MangasPage = getBrowsePage(page = page)
+    ): MangasPage {
+        return getBrowsePage(page = page)
+    }
 
     override suspend fun getSearchMangaList(
         page: Int,
         query: String,
         filters: FilterList,
-    ): MangasPage = getBrowsePage(
-        page = page,
-        query = query,
-        filters = filters,
-    )
+    ): MangasPage {
+        return getBrowsePage(
+            page = page,
+            query = query,
+            filters = filters,
+        )
+    }
 
     private suspend fun getBrowsePage(
         page: Int,
@@ -274,59 +299,161 @@ abstract class DesireScans : KeiSource() {
     ): List<Page> {
         val chapterUrl = getChapterUrl(chapter)
 
-        val initialPages = client
-            .get(chapterUrl)
-            .asJsoup()
-            .toPageList()
+        val initialDocument = runCatching {
+            client.get(chapterUrl).use { response ->
+                val responseBody = response.body.string()
+
+                Jsoup.parse(
+                    responseBody,
+                    response.request.url.toString(),
+                )
+            }
+        }.getOrNull()
+
+        val initialPages = initialDocument
+            ?.toPageList()
+            .orEmpty()
 
         if (initialPages.isNotEmpty()) {
             return initialPages
         }
 
-        /*
-         * DesireScans renders the reader images through client-side
-         * JavaScript. When they are absent from the initial OkHttp
-         * response, render the chapter in a WebView and parse the
-         * resulting DOM.
-         */
-        val renderedHtml = runWebView<String> {
-            onPageFinished { _ ->
-                evaluateJs(
-                    "document.documentElement.outerHTML",
-                ) { html ->
-                    resolve(html)
+        val handler = Handler(Looper.getMainLooper())
+        var pollingStarted = false
+
+        val webViewResult = runCatching {
+            runWebView<String> {
+                onPageFinished { loadedUrl ->
+                    val currentUrl = loadedUrl.orEmpty()
+
+                    if (pollingStarted) {
+                        return@onPageFinished
+                    }
+
+                    if (!currentUrl.startsWith(baseUrl)) {
+                        return@onPageFinished
+                    }
+
+                    pollingStarted = true
+
+                    fun inspectReader(attempt: Int) {
+                        evaluateJs(
+                            READER_POLL_SCRIPT,
+                        ) { rawResult ->
+                            val pollResult = rawResult
+                                .orEmpty()
+                                .toReaderPollResult()
+
+                            val allPagesLoaded =
+                                pollResult.totalPages > 0 &&
+                                    pollResult.urls.size >= pollResult.totalPages
+
+                            if (
+                                allPagesLoaded ||
+                                attempt >= MAX_WEBVIEW_POLL_ATTEMPTS
+                            ) {
+                                resolve(
+                                    pollResult.urls.joinToString("\n"),
+                                )
+
+                                return@evaluateJs
+                            }
+
+                            handler.postDelayed(
+                                {
+                                    inspectReader(attempt + 1)
+                                },
+                                WEBVIEW_POLL_DELAY_MS,
+                            )
+                        }
+                    }
+
+                    inspectReader(0)
                 }
+
+                loadUrl(chapterUrl)
             }
+        }.getOrDefault("")
 
-            loadUrl(chapterUrl)
-        }
-
-        return Jsoup
-            .parse(
-                renderedHtml,
-                chapterUrl,
-            )
-            .toPageList()
+        return webViewResult
+            .lineSequence()
+            .map { it.trim() }
+            .filter { it.startsWith("http") }
+            .distinct()
+            .mapIndexed { index, imageUrl ->
+                Page(
+                    index = index,
+                    imageUrl = imageUrl,
+                )
+            }
+            .toList()
     }
 
-    private fun Document.toPageList(): List<Page> = select(
-        "div[data-page] img[src], " +
-            "img[alt^=\"Page\"][src]",
-    )
-        .mapNotNull { image ->
-            image.extractImageUrl()
-        }
-        .distinct()
-        .mapIndexed { index, imageUrl ->
-            Page(
-                index = index,
-                imageUrl = imageUrl,
-            )
-        }
+    private fun Document.toPageList(): List<Page> {
+        return select(
+            "[data-page] img[src], " +
+                "[data-page] img[data-src], " +
+                "img[alt^=\"Page\"][src], " +
+                "img[alt^=\"Page\"][data-src]",
+        )
+            .mapNotNull { image ->
+                image.extractImageUrl()
+            }
+            .distinct()
+            .mapIndexed { index, imageUrl ->
+                Page(
+                    index = index,
+                    imageUrl = imageUrl,
+                )
+            }
+    }
+
+    private fun String.toReaderPollResult(): ReaderPollResult {
+        val trimmedResult = trim()
+
+        val decodedResult = runCatching {
+            trimmedResult.parseAs<String>()
+        }.getOrDefault(trimmedResult)
+
+        val lines = decodedResult.lines()
+        val header = lines
+            .firstOrNull()
+            .orEmpty()
+            .split('\t')
+
+        val totalPages = header
+            .getOrNull(0)
+            ?.toIntOrNull()
+            ?: 0
+
+        val missingPages = header
+            .getOrNull(2)
+            ?.toIntOrNull()
+            ?: 0
+
+        val currentUrl = header
+            .getOrNull(3)
+            .orEmpty()
+
+        val urls = lines
+            .drop(1)
+            .map { it.trim() }
+            .filter { it.startsWith("http") }
+            .distinct()
+
+        return ReaderPollResult(
+            totalPages = totalPages,
+            missingPages = missingPages,
+            currentUrl = currentUrl,
+            urls = urls,
+        )
+    }
 
     override fun getMangaUrl(
         manga: SManga,
-    ): String = "$baseUrl/series/comic/${manga.url}"
+    ): String {
+        return "$baseUrl/series/comic/${manga.url}"
+    }
 
     override fun getChapterUrl(
         chapter: SChapter,
@@ -407,19 +534,21 @@ abstract class DesireScans : KeiSource() {
         )
     }
 
-    private fun Document.getBookMetadata(): BookDto? = select(
-        "script[type=application/ld+json]",
-    )
-        .mapNotNull { script ->
-            runCatching {
-                script
-                    .data()
-                    .parseAs<BookDto>()
-            }.getOrNull()
-        }
-        .firstOrNull {
-            it.type == BOOK_SCHEMA_TYPE
-        }
+    private fun Document.getBookMetadata(): BookDto? {
+        return select(
+            "script[type=application/ld+json]",
+        )
+            .mapNotNull { script ->
+                runCatching {
+                    script
+                        .data()
+                        .parseAs<BookDto>()
+                }.getOrNull()
+            }
+            .firstOrNull {
+                it.type == BOOK_SCHEMA_TYPE
+            }
+    }
 
     private fun Element.extractImageUrl(): String? {
         val source = absUrl("src")
@@ -490,13 +619,31 @@ abstract class DesireScans : KeiSource() {
 
     private fun resolveUrl(
         url: String,
-    ): String = baseUrl
-        .toHttpUrl()
-        .resolve(url)
-        ?.toString()
-        ?: url
+    ): String {
+        return baseUrl
+            .toHttpUrl()
+            .resolve(url)
+            ?.toString()
+            ?: url
+    }
+
+    private class ReaderPollResult(
+        val totalPages: Int,
+        val missingPages: Int,
+        val currentUrl: String,
+        val urls: List<String>,
+    )
 
     companion object {
+        private const val MEDIA_HOST =
+            "media.desirescans.com"
+
+        private const val MAX_WEBVIEW_POLL_ATTEMPTS =
+            110
+
+        private const val WEBVIEW_POLL_DELAY_MS =
+            200L
+
         private val DEFAULT_TYPES = listOf(
             "Manhwa",
             "Manhua",
@@ -533,5 +680,112 @@ abstract class DesireScans : KeiSource() {
 
         private const val NEXT_IMAGE_URL_PARAMETER =
             "url"
+
+        private val READER_POLL_SCRIPT = """
+            (() => {
+                window.__desirePageUrls =
+                    window.__desirePageUrls || {};
+
+                const pageElements = new Map();
+
+                document
+                    .querySelectorAll('[data-page]')
+                    .forEach((element) => {
+                        const page = element.getAttribute('data-page');
+
+                        if (page && !pageElements.has(page)) {
+                            pageElements.set(page, element);
+                        }
+                    });
+
+                document
+                    .querySelectorAll(
+                        '[data-page] img[src], ' +
+                        '[data-page] img[data-src], ' +
+                        'img[alt^="Page"][src], ' +
+                        'img[alt^="Page"][data-src]'
+                    )
+                    .forEach((image) => {
+                        const container =
+                            image.closest('[data-page]');
+
+                        const altMatch =
+                            (image.getAttribute('alt') || '')
+                                .match(/\d+/);
+
+                        const page =
+                            container?.getAttribute('data-page') ||
+                            altMatch?.[0];
+
+                        const source =
+                            image.currentSrc ||
+                            image.src ||
+                            image.getAttribute('src') ||
+                            image.getAttribute('data-src') ||
+                            '';
+
+                        if (page && source) {
+                            window.__desirePageUrls[page] = source;
+                        }
+                    });
+
+                const orderedPages =
+                    Array.from(pageElements.keys())
+                        .sort((first, second) =>
+                            Number(first) - Number(second)
+                        );
+
+                const missingPages =
+                    orderedPages.filter(
+                        (page) =>
+                            !window.__desirePageUrls[page]
+                    );
+
+                if (missingPages.length > 0) {
+                    const target =
+                        pageElements.get(missingPages[0]);
+
+                    if (target) {
+                        target.scrollIntoView({
+                            behavior: 'auto',
+                            block: 'center',
+                        });
+
+                        window.dispatchEvent(
+                            new Event('scroll')
+                        );
+                    }
+                } else if (orderedPages.length > 0) {
+                    window.scrollTo({
+                        top: 0,
+                        behavior: 'auto',
+                    });
+                }
+
+                const orderedUrls =
+                    Object.entries(
+                        window.__desirePageUrls
+                    )
+                        .sort(
+                            ([first], [second]) =>
+                                Number(first) - Number(second)
+                        )
+                        .map(([, url]) => url)
+                        .filter(Boolean);
+
+                const header = [
+                    orderedPages.length,
+                    orderedUrls.length,
+                    missingPages.length,
+                    window.location.href,
+                ].join('\t');
+
+                return (
+                    header +
+                    '\n' +
+                    orderedUrls.join('\n')
+                );
+            })()
+        """.trimIndent()
     }
 }

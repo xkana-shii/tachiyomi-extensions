@@ -103,7 +103,7 @@ abstract class Kagane :
             ContentRatingFilter(contentRating.toSet()),
             GenresFilter(emptyList(), excludedGenreIds),
 
-            ),
+        ),
     )
 
     // =============================== Latest ===============================

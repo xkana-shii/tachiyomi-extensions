@@ -103,7 +103,7 @@ abstract class Kagane :
             ContentRatingFilter(contentRating.toSet()),
             GenresFilter(emptyList(), excludedGenreIds),
 
-        ),
+            ),
     )
 
     // =============================== Latest ===============================
@@ -155,8 +155,6 @@ abstract class Kagane :
                     else -> {}
                 }
             }
-
-            val metadata = metadata
 
             filters.forEach { filter ->
                 when (filter) {

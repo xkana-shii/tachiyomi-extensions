@@ -24,7 +24,6 @@ import eu.kanade.tachiyomi.util.asJsoup
 import keiyoushi.annotation.Source
 import keiyoushi.network.addCookie
 import keiyoushi.network.get
-import keiyoushi.network.rateLimit
 import keiyoushi.source.KeiSource
 import keiyoushi.utils.decodeHex
 import keiyoushi.utils.getPreferences
@@ -68,7 +67,6 @@ abstract class Mangago :
     override fun OkHttpClient.Builder.configureClient() = apply {
         addInterceptor(::imageDescrambler)
         addCookie("_m_superu" to "1")
-        rateLimit(1) { it.host == baseUrl.toHttpUrl().host }
     }
 
     override fun Headers.Builder.configureHeaders() = apply {
@@ -168,8 +166,16 @@ abstract class Mangago :
     }
 
     private fun parseMangaDetails(document: Document): SManga = SManga.create().apply {
-        document.selectFirst(".w-title h1")?.text()?.let {
-            title = if (isRemoveTitleVersion()) it.replace(TITLE_REGEX, "") else it
+        val removedTitleInfo = mutableListOf<String>()
+
+        document.selectFirst(".w-title h1")?.text()?.let { originalTitle ->
+            title = originalTitle
+            if (isRemoveTitleVersion()) {
+                title = title.removeTitleInfo(TITLE_REGEX, removedTitleInfo)
+            }
+            customTitleRegex()?.let { regex ->
+                title = title.removeTitleInfo(regex, removedTitleInfo)
+            }
         }
 
         document.getElementById("information")?.let { info ->
@@ -209,9 +215,25 @@ abstract class Mangago :
                 }
             }
         }
+
+        removedTitleInfo.removeAll { it.trim().equals("(Yaoi)", ignoreCase = true) }
+        if (removedTitleInfo.isNotEmpty()) {
+            description = buildString {
+                append(description.orEmpty())
+                if (isNotEmpty()) append("\n\n")
+                append("----\n#### **Removed from title**\n")
+                removedTitleInfo.joinTo(this, "\n", postfix = "\n") { "- `$it`" }
+            }.trim().ifEmpty { null }
+        }
     }
 
-    private fun parseChapterList(document: Document): List<SChapter> = document.select("table#chapter_table > tbody > tr, table.uk-table > tbody > tr")
+    private fun chapterListSelector() = if (preferences.getBoolean(SHOW_RAW_CHAPTERS_PREF, false)) {
+        "table#chapter_table > tbody > tr, table.uk-table > tbody > tr, table#raws_table > tbody > tr"
+    } else {
+        "table#chapter_table > tbody > tr:not(:has(a[href*='/raw/'])), table.uk-table > tbody > tr:not(:has(a[href*='/raw/']))"
+    }
+
+    private fun parseChapterList(document: Document): List<SChapter> = document.select(chapterListSelector())
         .mapNotNull { element ->
             val link = element.selectFirst("a.chico") ?: return@mapNotNull null
             val name = link.text().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
@@ -220,10 +242,12 @@ abstract class Mangago :
                 ?.text()
                 ?.takeIf { it.isNotEmpty() }
             val chapterUrl = link.absUrl("href")
+            val isRaw = "/raw/" in chapterUrl
+            val stableName = if (isRaw) "raw:$name" else name
 
             SChapter.create().apply {
-                url = stableChapterId(date, name, scanlator)
-                this.name = name
+                url = stableChapterId(date, stableName, scanlator)
+                this.name = if (isRaw) "🉐 $name" else name
                 date_upload = date
                 this.scanlator = scanlator ?: "Unknown"
                 memo = buildJsonObject { put("chapterUrl", chapterUrl) }
@@ -518,7 +542,16 @@ abstract class Mangago :
         .joinToString("") { "%02x".format(it) }
         .takeLast(10)
 
+    private fun String.removeTitleInfo(regex: Regex, removed: MutableList<String>) = replace(regex) {
+        removed += it.value
+        ""
+    }.trim()
+
     private fun isRemoveTitleVersion() = preferences.getBoolean(REMOVE_TITLE_VERSION_PREF, false)
+
+    private fun customTitleRegex() = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", null)
+        ?.takeIf { it.isNotBlank() }
+        ?.let { Regex(it, RegexOption.IGNORE_CASE) }
 
     override fun setupPreferenceScreen(screen: PreferenceScreen) {
         SwitchPreferenceCompat(screen.context).apply {
@@ -527,6 +560,20 @@ abstract class Mangago :
             summary = "This removes version tags like '(Official)' or '(Yaoi)' from entry titles " +
                 "and helps identify duplicate entries in your library. " +
                 "To update existing entries, enable 'update library manga title' in advanced settings of app"
+            setDefaultValue(false)
+        }.let(screen::addPreference)
+
+        EditTextPreference(screen.context).apply {
+            key = "${REMOVE_TITLE_CUSTOM_PREF}_$lang"
+            title = "Remove custom information from title"
+            summary = preferences.getString("${REMOVE_TITLE_CUSTOM_PREF}_$lang", "") ?: ""
+            setDefaultValue("")
+        }.let(screen::addPreference)
+
+        SwitchPreferenceCompat(screen.context).apply {
+            key = SHOW_RAW_CHAPTERS_PREF
+            title = "Show raw chapters"
+            summary = "Include raw (untranslated) chapters in the chapter list."
             setDefaultValue(false)
         }.let(screen::addPreference)
 
@@ -552,6 +599,8 @@ abstract class Mangago :
 }
 
 private const val REMOVE_TITLE_VERSION_PREF = "REMOVE_TITLE_VERSION"
+private const val REMOVE_TITLE_CUSTOM_PREF = "TITLE_REGEX_PATTERN"
+private const val SHOW_RAW_CHAPTERS_PREF = "SHOW_RAW_CHAPTERS"
 private const val PREF_KEY_CUSTOM_UA = "pref_key_custom_ua_"
 private const val ALT_NAME_PREFIX = "Alternative Names:"
 
@@ -572,7 +621,7 @@ private val JS_FILTERS = listOf(
     "height",
 )
 private val TITLE_REGEX = Regex(
-    """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩)\s*)+|(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|/\s*Official)\s*)+$""",
+    """^(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|‹[^›]*›|-[^-]*-)\s*)+|(?:\s*(?:\([^()]*\)|\{[^{}]*\}|\[(?:(?!]).)*]|«[^»]*»|〘[^〙]*〙|「[^」]*」|『[^』]*』|≪[^≫]*≫|﹛[^﹜]*﹜|〖[^〖〗]*〗|𖤍.+?𖤍|《[^》]*》|⌜.+?⌝|⟨[^⟩]*⟩|【[^】]*】|‹[^›]*›|-[^-]*-|/\s*Official|\|.*|/.*|~.*)\s*)+$""",
     RegexOption.IGNORE_CASE,
 )
 private val REPLACE_POS_BYTECODE by lazy {

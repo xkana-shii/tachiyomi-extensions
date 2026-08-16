@@ -18,7 +18,7 @@ ARTIFACTS_DIR = Path.home() / "apk-artifacts"
 # The checked-out `repo` branch we publish into (the working directory).
 REPO_DIR = Path.cwd()
 
-ICON_BASE_URL = "https://cdn.jsdelivr.net/gh/yuzono/tachiyomi-extensions@main"
+ICON_BASE_URL = "https://cdn.jsdelivr.net/gh/xkana-shii/tachiyomi-extensions@main"
 RELEASE_BASE_URL = f"https://github.com/{REPO_NAME}/releases/download"
 ASSET_LIMIT = 495  # Actual limit is 1000 but we upload 2 items per extension.
 UPLOAD_CHUNK_SIZE = 80
@@ -183,9 +183,9 @@ final_extensions.extend(ext for ext, _, _, _, _ in new_extensions)
 final_extensions.sort(key=lambda ext: ext.packageName)
 
 index = index_pb2.Index(
-    name="Yūzōnō",
-    badgeLabel="Yū",
-    signingKey="cbec121aa82ebb02aaa73806992e0368a97d47b5451ed6524816d03084c45905",
+    name="Kanashii",
+    badgeLabel="KNS",
+    signingKey="0df5b32b5dba0c61eae08fa46394585f1146c44b166e8ef6e5b7de37106026e3",
     contact=index_pb2.Contact(
         website="https://yuzono.github.io",
         discord="https://discord.gg/85MZhUX688",

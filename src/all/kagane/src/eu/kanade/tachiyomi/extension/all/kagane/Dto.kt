@@ -63,8 +63,8 @@ class SearchDto(
         val alternateTitles: List<String> = emptyList(),
     ) {
 
-        fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>, cleanTitle: Boolean): SManga = SManga.create().apply {
-            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
+        fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>): SManga = SManga.create().apply {
+            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.trim()
             url = id
             thumbnail_url = coverImage?.let { "$apiUrl/image/$it" }
         }
@@ -88,8 +88,8 @@ class TrackerDto(
         val coverImage: String? = null,
     ) {
 
-        fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>, cleanTitle: Boolean): SManga = SManga.create().apply {
-            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.clean(cleanTitle)
+        fun toSManga(apiUrl: String, showSource: Boolean, sources: Map<String, String>): SManga = SManga.create().apply {
+            title = if (showSource && !sources.isEmpty()) "${this@Book.title.trim()} [${sources[this@Book.sourceId]}]" else this@Book.title.trim()
             url = id
             thumbnail_url = coverImage?.let { "$apiUrl/image/$it" }
         }

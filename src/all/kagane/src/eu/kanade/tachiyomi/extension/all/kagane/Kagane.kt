@@ -226,7 +226,7 @@ abstract class Kagane :
 
         val response = client.post(url, body)
         val dto = response.parseAs<SearchDto>()
-        val mangas = dto.content.map { it.toSManga(apiUrl, showSource, sources, cleanTitle) }
+        val mangas = dto.content.map { it.toSManga(apiUrl, showSource, sources) }
         return MangasPage(mangas, hasNextPage = dto.hasNextPage())
     }
 
@@ -303,7 +303,7 @@ abstract class Kagane :
             .parseAs<TrackerDto>()
             .bookSeries
         return series
-            .map { it.toSManga(apiUrl, showSource, sources, cleanTitle) }
+            .map { it.toSManga(apiUrl, showSource, sources) }
     }
 
     // =============================== Pages ================================
